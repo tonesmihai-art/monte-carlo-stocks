@@ -2,37 +2,6 @@
 //  APP.JS — Orchestrare principala
 // ─────────────────────────────────────────────────────
 
-window.addEventListener('load', () => {
-    const istoric = JSON.parse(localStorage.getItem('istoricSimulari')) || [];
-    const container = document.getElementById('status'); 
-
-    if (istoric.length > 0) {
-        let html = '<div style="margin-top:10px;"><strong>Istoric (clic pentru simulare):</strong><br>';
-        istoric.forEach(item => {
-            // Creăm un "chip" clicabil pentru fiecare ticker
-            html += `<button class="example-chip history-item" 
-                             style="margin: 5px; cursor: pointer;" 
-                             data-ticker="${item.ticker}">
-                        ${item.ticker} (${item.pret})
-                     </button>`;
-        });
-        html += '</div>';
-        container.innerHTML = html;
-        container.style.display = 'block';
-
-        // Adăugăm evenimentul de clic pe fiecare element din istoric
-        document.querySelectorAll('.history-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const ticker = btn.getAttribute('data-ticker');
-                document.getElementById('ticker-input').value = ticker;
-                document.getElementById('run-btn').click(); // Pornește automat simularea
-            });
-        });
-    }
-});
-
-
-
 import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS } from './montecarlo.js';
 import { analyzeSentiment } from './sentiment.js';
@@ -49,6 +18,63 @@ let currentResult = null;
 
 // ── DOM refs ─────────────────────────────────────────
 const $ = id => document.getElementById(id);
+
+// ── Istoric localStorage ──────────────────────────────
+const ISTORIC_KEY = 'istoricSimulari';
+const MAX_ISTORIC = 10;
+
+function loadIstoric() {
+  try {
+    return JSON.parse(localStorage.getItem(ISTORIC_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveIstoric(ticker, pret) {
+  let istoric = loadIstoric();
+  // Scoatem ticker-ul daca exista deja (il mutam la inceput)
+  istoric = istoric.filter(item => item.ticker !== ticker);
+  // Adaugam la inceput
+  istoric.unshift({
+    ticker,
+    pret,
+    timestamp: new Date().toLocaleString('ro-RO', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+    })
+  });
+  // Pastram doar ultimele MAX_ISTORIC
+  localStorage.setItem(ISTORIC_KEY, JSON.stringify(istoric.slice(0, MAX_ISTORIC)));
+}
+
+function renderIstoric() {
+  const istoric = loadIstoric();
+  const container = $('history-container');
+  const list      = $('history-list');
+
+  if (!container || !list) return;
+
+  if (istoric.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'flex';
+  list.innerHTML = '';
+
+  istoric.forEach(item => {
+    const btn = document.createElement('button');
+    btn.className       = 'example-chip';
+    btn.title           = `Simulat la: ${item.timestamp}`;
+    btn.textContent     = `${item.ticker} (${item.pret})`;
+    btn.dataset.ticker  = item.ticker;
+    btn.addEventListener('click', () => {
+      $('ticker-input').value = item.ticker;
+      runSimulation();
+    });
+    list.appendChild(btn);
+  });
+}
 
 // ── Yahoo Finance via CORS proxy ─────────────────────
 async function fetchStockData(ticker) {
@@ -295,32 +321,11 @@ async function runSimulation() {
 
     currentResult = { stock, periodResults, sentimentData, drift, sigma, driftAdj, sigmaAdj };
 
-//267-276 Presupunem că 'rezultate' este obiectul sau array-ul tău cu datele finale
-const tickerNou = document.getElementById('ticker-input').value.toUpperCase();
-const pretNou = document.getElementById('stock-price').innerText;
+    // ── 5. Salveaza in istoric ────────────────────────
+    saveIstoric(ticker, `${currency} ${fmt(currentPrice)}`);
+    renderIstoric(); // actualizeaza butoanele fara reload
 
-let istoric = JSON.parse(localStorage.getItem('istoricSimulari')) || [];
-
-// Eliminăm ticker-ul dacă exista deja (ca să îl punem la început ca fiind cel mai nou)
-istoric = istoric.filter(item => item.ticker !== tickerNou);
-
-// Adăugăm noile date la început
-istoric.unshift({
-    ticker: tickerNou,
-    pret: pretNou,
-    timestamp: new Date().toLocaleTimeString()
-});
-
-// Păstrăm doar ultimele 10 pentru a nu aglomera ecranul
-localStorage.setItem('istoricSimulari', JSON.stringify(istoric.slice(0, 10)));
-
-// 2. LINIA NOUĂ: Forțează interfața să deseneze noile butoane în "Recent"
-window.dispatchEvent(new Event('load'));
-      
-localStorage.setItem('ultimaSimulare', JSON.stringify(dateDeSalvat));
-console.log("Simularea a fost salvată local!");
-
-    // ── 5. Randare rezultate ─────────────────────────
+    // ── 6. Randare rezultate ─────────────────────────
     setStatus('');
     $('results-section').style.display = 'block';
 
@@ -356,6 +361,9 @@ console.log("Simularea a fost salvată local!");
 
 // ── Event listeners ───────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // Randeaza istoricul salvat la pornire
+  renderIstoric();
+
   $('run-btn').addEventListener('click', runSimulation);
   $('ticker-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') runSimulation();

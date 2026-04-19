@@ -2,6 +2,25 @@
 //  APP.JS — Orchestrare principala
 // ─────────────────────────────────────────────────────
 
+window.addEventListener('load', () => {
+    const dateSalvate = localStorage.getItem('ultimaSimulare');
+
+    if (dateSalvate) {
+        const data = JSON.parse(dateSalvate);
+        
+        // Populăm interfața cu ce am găsit în memorie
+        document.getElementById('status').innerText = `Ultima simulare salvată (${data.timestamp})`;
+        document.getElementById('status').style.display = 'block';
+        document.getElementById('results-section').style.display = 'block';
+        
+        document.getElementById('stock-ticker').innerText = data.ticker;
+        document.getElementById('stock-price').innerText = data.pret;
+        
+        console.log("Am încărcat datele salvate offline pentru:", data.ticker);
+    }
+});
+
+
 import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS } from './montecarlo.js';
 import { analyzeSentiment } from './sentiment.js';
@@ -263,6 +282,17 @@ async function runSimulation() {
     }
 
     currentResult = { stock, periodResults, sentimentData, drift, sigma, driftAdj, sigmaAdj };
+
+//267-276 Presupunem că 'rezultate' este obiectul sau array-ul tău cu datele finale
+const dateDeSalvat = {
+    ticker: document.getElementById('ticker-input').value.toUpperCase(),
+    pret: document.getElementById('stock-price').innerText,
+    timestamp: new Date().toLocaleString(),
+    // adaugă aici orice alte date importante vrei să rămână pe ecran
+};
+
+localStorage.setItem('ultimaSimulare', JSON.stringify(dateDeSalvat));
+console.log("Simularea a fost salvată local!");
 
     // ── 5. Randare rezultate ─────────────────────────
     setStatus('');

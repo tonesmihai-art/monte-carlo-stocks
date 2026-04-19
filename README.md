@@ -13,7 +13,7 @@ monte-carlo-pwa/
 │   └── style.css
 ├── js/
 │   ├── app.js          ← orchestrare principala
-│   ├── montecarlo.js   ← simulare GBM (100.000 scenarii)
+│   ├── montecarlo.js   ← simulare GBM (50.000 scenarii)
 │   ├── sentiment.js    ← analiza stiri + VADER
 │   └── charts.js       ← grafice Chart.js
 └── icons/

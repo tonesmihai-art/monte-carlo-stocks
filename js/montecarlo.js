@@ -3,7 +3,7 @@
 //  pret_nou = pret_vechi * exp(drift + sigma * Z)
 // ─────────────────────────────────────────────────────
 
-const NUM_SIMS = 10_000;
+const NUM_SIMS = 100_000;
 
 // Box-Muller: generam numere aleatoare cu distributie normala
 function randNormal() {

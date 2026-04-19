@@ -2,7 +2,7 @@
   "name": "Monte Carlo Stocks",
   "short_name": "MC Stocks",
   "description": "Simulare Monte Carlo pentru actiuni cu analiza sentiment",
-  "start_url": "/",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0a0a14",
   "theme_color": "#0a0a14",

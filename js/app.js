@@ -3,22 +3,34 @@
 // ─────────────────────────────────────────────────────
 
 window.addEventListener('load', () => {
-    const dateSalvate = localStorage.getItem('ultimaSimulare');
+    const istoric = JSON.parse(localStorage.getItem('istoricSimulari')) || [];
+    const container = document.getElementById('status'); 
 
-    if (dateSalvate) {
-        const data = JSON.parse(dateSalvate);
-        
-        // Populăm interfața cu ce am găsit în memorie
-        document.getElementById('status').innerText = `Ultima simulare salvată (${data.timestamp})`;
-        document.getElementById('status').style.display = 'block';
-        document.getElementById('results-section').style.display = 'block';
-        
-        document.getElementById('stock-ticker').innerText = data.ticker;
-        document.getElementById('stock-price').innerText = data.pret;
-        
-        console.log("Am încărcat datele salvate offline pentru:", data.ticker);
+    if (istoric.length > 0) {
+        let html = '<div style="margin-top:10px;"><strong>Istoric (clic pentru simulare):</strong><br>';
+        istoric.forEach(item => {
+            // Creăm un "chip" clicabil pentru fiecare ticker
+            html += `<button class="example-chip history-item" 
+                             style="margin: 5px; cursor: pointer;" 
+                             data-ticker="${item.ticker}">
+                        ${item.ticker} (${item.pret})
+                     </button>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+        container.style.display = 'block';
+
+        // Adăugăm evenimentul de clic pe fiecare element din istoric
+        document.querySelectorAll('.history-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const ticker = btn.getAttribute('data-ticker');
+                document.getElementById('ticker-input').value = ticker;
+                document.getElementById('run-btn').click(); // Pornește automat simularea
+            });
+        });
     }
 });
+
 
 
 import { calcParams, simulate, calcStats, percentilesPerDay,
@@ -284,13 +296,26 @@ async function runSimulation() {
     currentResult = { stock, periodResults, sentimentData, drift, sigma, driftAdj, sigmaAdj };
 
 //267-276 Presupunem că 'rezultate' este obiectul sau array-ul tău cu datele finale
-const dateDeSalvat = {
-    ticker: document.getElementById('ticker-input').value.toUpperCase(),
-    pret: document.getElementById('stock-price').innerText,
-    timestamp: new Date().toLocaleString(),
-    // adaugă aici orice alte date importante vrei să rămână pe ecran
-};
+const tickerNou = document.getElementById('ticker-input').value.toUpperCase();
+const pretNou = document.getElementById('stock-price').innerText;
 
+let istoric = JSON.parse(localStorage.getItem('istoricSimulari')) || [];
+
+// Eliminăm ticker-ul dacă exista deja (ca să îl punem la început ca fiind cel mai nou)
+istoric = istoric.filter(item => item.ticker !== tickerNou);
+
+// Adăugăm noile date la început
+istoric.unshift({
+    ticker: tickerNou,
+    pret: pretNou,
+    timestamp: new Date().toLocaleTimeString()
+});
+
+// Păstrăm doar ultimele 10 pentru a nu aglomera ecranul
+localStorage.setItem('istoricSimulari', JSON.stringify(istoric.slice(0, 10)));
+
+
+      
 localStorage.setItem('ultimaSimulare', JSON.stringify(dateDeSalvat));
 console.log("Simularea a fost salvată local!");
 

@@ -314,7 +314,8 @@ istoric.unshift({
 // Păstrăm doar ultimele 10 pentru a nu aglomera ecranul
 localStorage.setItem('istoricSimulari', JSON.stringify(istoric.slice(0, 10)));
 
-
+// 2. LINIA NOUĂ: Forțează interfața să deseneze noile butoane în "Recent"
+window.dispatchEvent(new Event('load'));
       
 localStorage.setItem('ultimaSimulare', JSON.stringify(dateDeSalvat));
 console.log("Simularea a fost salvată local!");

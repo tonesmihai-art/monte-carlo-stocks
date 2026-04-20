@@ -216,10 +216,11 @@ async function runSimulation() {
 
     // ── 2. Parametri GBM ─────────────────────────────
     setStatus('Calculez parametri GBM...');
-    const { drift, sigma } = calcParams(closes);
+    const { drift, sigma, mean50, deviationPct } = calcParams(closes);
     $('info-sigma').textContent = `${(sigma * 100).toFixed(3)}%/zi`;
     $('info-vol').textContent   = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}%/an`;
     $('info-drift').textContent = `${(drift * 100).toFixed(4)}%/zi`;
+    $('info-ma50').textContent  = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
 
     // ── 3. Sector + VIX (independent, intotdeauna rulat) ─
     setStatus('Detectez sector si VIX...');
@@ -236,7 +237,7 @@ async function runSimulation() {
 
     // ── 4. Sentiment AI ──────────────────────────────
     let sentimentData = null;
-    let driftAdj = null, sigmaAdj = null;
+    let driftAdj = null, sigmaAdj = null, meanRevStrength = 0;
 
     if (doSentiment) {
       setStatus('Analizez sentiment (Yahoo + Reuters + Google News)...');
@@ -246,9 +247,10 @@ async function runSimulation() {
         if (sentimentData.vix?.vix)      vixData       = sentimentData.vix;
 
         const scores = Object.values(sentimentData.factori).map(f => f.scor);
-        const adj    = adjustParams(drift, sigma, scores, sectorWeights, vixData.vixImpact);
+        const adj    = adjustParams(drift, sigma, scores, sectorWeights, vixData.vixImpact, deviationPct);
         driftAdj     = adj.driftAdj;
         sigmaAdj     = adj.sigmaAdj;
+        meanRevStrength = adj.meanRevStrength ?? 0;
 
         $('sent-global').textContent = `${sentimentData.sentimentGlobal >= 0 ? '+' : ''}${sentimentData.sentimentGlobal.toFixed(3)}`;
         $('sent-global').style.color = sentimentData.sentimentGlobal > 0.1 ? '#66bb6a'
@@ -289,9 +291,9 @@ async function runSimulation() {
     for (const days of PERIODS) {
       setStatus(`Simulez ${days} zile (${NUM_SIMS.toLocaleString()} scenarii)...`);
       await new Promise(r => setTimeout(r, 0));
-      const matrix    = simulate(currentPrice, drift, sigma, days);
+      const matrix    = simulate(currentPrice, drift, sigma, days, null, null, meanRevStrength, mean50);
       const matrixAdj = driftAdj != null
-        ? simulate(currentPrice, drift, sigma, days, driftAdj, sigmaAdj) : null;
+        ? simulate(currentPrice, drift, sigma, days, driftAdj, sigmaAdj, meanRevStrength, mean50) : null;
       periodResults[days] = {
         days,
         stats:    calcStats(matrix, days, currentPrice),

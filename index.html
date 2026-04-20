@@ -8,30 +8,35 @@
   <meta name="theme-color" content="#0a0a14" />
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="css/style.css" />
-  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    #sector-badge { display:none; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+    .sector-chip {
+      background: rgba(79,195,247,0.12); color: #4fc3f7;
+      border: 1px solid rgba(79,195,247,0.3);
+      border-radius: 20px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+    }
+    .vix-chip {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+    }
+  </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- ── Header ───────────────────────────────────── -->
   <header>
     <div class="logo">MC<span>.</span>Stocks</div>
-    <div class="tagline">Monte Carlo · 50k Simulari · Sentiment AI</div>
+    <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
-  <!-- ── Nav ──────────────────────────────────────── -->
   <nav class="nav">
     <button class="nav-btn active" data-section="sim-section">Simulare</button>
     <button class="nav-btn" data-section="about-section">Despre</button>
   </nav>
 
-  <!-- ════════════════════════════════════════════════
-       SECTIUNEA: SIMULARE
-  ═════════════════════════════════════════════════ -->
   <section id="sim-section" class="section active">
 
-    <!-- Input panel -->
     <div class="input-panel">
       <div class="input-row">
         <div class="input-group">
@@ -61,24 +66,20 @@
         <button class="example-chip" data-ticker="TLV.RO">TLV.RO</button>
       </div>
 
-      <!-- Istoric tickere calculate -->
       <div id="history-container" class="examples" style="margin-top:10px; display:none;">
         <span style="font-size:10px;color:var(--gray);letter-spacing:1px;align-self:center;">Istoric:</span>
         <div id="history-list" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
       </div>
     </div>
 
-    <!-- Status -->
     <div id="status" class="status" style="display:none"></div>
 
-    <!-- ── Rezultate ──────────────────────────────── -->
     <div id="results-section" style="display:none">
-
-      <!-- Stock info bar -->
       <div class="stock-bar">
         <div>
           <div id="stock-name" class="stock-name">—</div>
           <div id="stock-ticker" class="stock-ticker">—</div>
+          <div id="sector-badge"></div>
         </div>
         <div class="info-pills">
           <div class="pill">Sigma: <span id="info-sigma">—</span></div>
@@ -88,21 +89,15 @@
         <div id="stock-price" class="stock-price">—</div>
       </div>
 
-      <!-- Pret istoric (ultimele 60 zile) -->
       <div class="price-chart-box">
         <div class="chart-label">Pret istoric — ultimele 60 zile</div>
         <div class="canvas-wrap"><canvas id="price-chart"></canvas></div>
       </div>
 
-      <!-- Tabs perioade -->
       <div id="period-tabs" class="period-tabs"></div>
-
-      <!-- Zona grafice + statistici -->
       <div id="chart-area"></div>
+    </div>
 
-    </div><!-- /results-section -->
-
-    <!-- ── Sentiment ──────────────────────────────── -->
     <div id="sentiment-section" style="display:none">
       <div class="chart-box" style="margin-bottom:16px">
         <div class="sent-header">
@@ -113,64 +108,54 @@
         <div id="sent-sources"></div>
         <div class="canvas-wrap-lg"><canvas id="sentiment-chart"></canvas></div>
       </div>
-
       <div id="factors-detail" class="factors-grid"></div>
     </div>
 
-  </section><!-- /sim-section -->
+  </section>
 
-  <!-- ════════════════════════════════════════════════
-       SECTIUNEA: DESPRE
-  ═════════════════════════════════════════════════ -->
   <section id="about-section" class="section">
     <div class="about-content">
       <h2>Cum functioneaza</h2>
 
       <h3>Monte Carlo — Geometric Brownian Motion</h3>
-      <p>Programul simuleaza 50.000 de scenarii posibile pentru pretul unei actiuni
+      <p>Programul simuleaza 30.000 de scenarii posibile pentru pretul unei actiuni
          pe baza volatilitatii si trendului istoric din ultimul an.</p>
-      <div class="formula">
-        Pret(t+1) = Pret(t) × exp(drift + sigma × Z)
-      </div>
+      <div class="formula">Pret(t+1) = Pret(t) × exp(drift + sigma × Z)</div>
       <p>Unde <code>drift</code> este tendinta medie zilnica, <code>sigma</code> este
          volatilitatea zilnica, iar <code>Z</code> este un numar aleator din distributia normala.</p>
 
+      <h3>Detectie sector + ponderi dinamice</h3>
+      <p>Aplicatia detecteaza automat sectorul actiunii (Technology, Energy, Financial Services etc.)
+         si aplica ponderi diferite celor 7 factori. De exemplu, pentru o companie de energie,
+         geopolitica si tarifele comerciale conteaza mai mult decat pentru o companie tech.</p>
+
+      <h3>VIX — Indicele fricii</h3>
+      <p>VIX masoara volatilitatea implicita a pietei. Cand VIX depaseste 25,
+         sigma din simulare creste automat pentru a reflecta incertitudinea crescuta.</p>
+
       <h3>Analiza Sentiment</h3>
-      <p>Programul descarca stiri recente din 3 surse — Yahoo Finance, Reuters RSS si
-         Google News — si le analizeaza cu un algoritm VADER (Valence Aware Dictionary
-         and sEntiment Reasoner) implementat local, fara API key.</p>
-      <p>Sentimentul influenteaza parametrii GBM: un sentiment pozitiv creste drift-ul,
-         iar un sentiment negativ sau extrem creste volatilitatea.</p>
-
-      <h3>Cei 7 factori externi</h3>
-      <p>Stirile sunt clasificate automat in 7 categorii: geopolitic, inflatie/dobanzi,
-         crize financiare, pandemii, tarife comerciale, alegeri/politica si stiri despre companie.
-         Fiecare factor primeste un scor de la -1.0 (bearish) la +1.0 (bullish).</p>
-
-      <h3>Date</h3>
-      <p>Preturile istorice vin din Yahoo Finance via un proxy public.
-         Stirile vin din RSS feeds publice, fara cont sau API key necesar.</p>
+      <p>Stirile sunt descarcate din Yahoo Finance, Reuters RSS si Google News,
+         analizate cu VADER implementat local (fara API key) si clasificate in 7 factori,
+         fiecare ponderat in functie de sectorul actiunii.</p>
 
       <div class="disclaimer">
         ⚠️ DISCLAIMER: Aceasta aplicatie este o simulare matematica bazata pe date istorice
-        si analiza de sentiment automata. Nu reprezinta sfat financiar. Pietele sunt
-        influentate de factori imposibil de modelat complet. Foloseste cu discernamant.
+        si analiza de sentiment automata. Nu reprezinta sfat financiar. Foloseste cu discernamant.
       </div>
     </div>
   </section>
 
-</div><!-- /app -->
+</div>
 
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js')
-        .then(reg => console.log('Service Worker înregistrat cu succes!', reg))
-        .catch(err => console.log('Eroare la înregistrarea Service Worker:', err));
+        .then(reg => console.log('SW inregistrat', reg))
+        .catch(err => console.log('SW eroare', err));
     });
   }
 </script>
-
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

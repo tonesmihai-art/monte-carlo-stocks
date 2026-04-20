@@ -4,7 +4,6 @@
 
 import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS } from './montecarlo.js';
-// CUM TREBUIE SA FIE:
 import { analyzeSentiment, fetchSectorData, fetchVIX } from './sentiment.js';
 import { drawPriceHistory, drawTrajectories,
          drawHistogram, drawSentiment, destroyAll } from './charts.js';
@@ -114,7 +113,7 @@ function renderSectorBadge(sector, industry, vixData, weights) {
   const el = $('sector-badge');
   if (!el) return;
   const emoji    = weights?.emoji || '📊';
-  const vixColor = !vixData?.vix  ? '#888'
+  const vixColor = !vixData?.vix    ? '#888'
                  : vixData.vix < 15 ? '#66bb6a'
                  : vixData.vix < 25 ? '#ffee58'
                  : vixData.vix < 35 ? '#ffa726'
@@ -151,13 +150,13 @@ function renderStatsCard(stats, statsAdj, currentPrice, days, currency) {
         <thead><tr><th></th><th style="color:#4fc3f7">Clasic</th><th style="color:#ffa726">AI Ajustat</th></tr></thead>
         <tbody>
           <tr><td colspan="3" class="stat-sep">Preturi estimate</td></tr>
-          ${row('Pret curent',    currentPrice, null,           '#fff')}
-          ${row('Medie',          stats.mean,   statsAdj?.mean, '#ffee58')}
+          ${row('Pret curent',    currentPrice, null,            '#fff')}
+          ${row('Medie',          stats.mean,   statsAdj?.mean,  '#ffee58')}
           ${row('Median',         stats.median, statsAdj?.median,'#fff')}
-          ${row('P90 — optimist', stats.p90,    statsAdj?.p90,  '#66bb6a')}
-          ${row('P10 — pesimist', stats.p10,    statsAdj?.p10,  '#ef5350')}
-          ${row('Max simulat',    stats.max,    statsAdj?.max,  '#4fc3f7')}
-          ${row('Min simulat',    stats.min,    statsAdj?.min,  '#4fc3f7')}
+          ${row('P90 — optimist', stats.p90,    statsAdj?.p90,   '#66bb6a')}
+          ${row('P10 — pesimist', stats.p10,    statsAdj?.p10,   '#ef5350')}
+          ${row('Max simulat',    stats.max,    statsAdj?.max,   '#4fc3f7')}
+          ${row('Min simulat',    stats.min,    statsAdj?.min,   '#4fc3f7')}
           <tr><td colspan="3" class="stat-sep">Probabilitati</td></tr>
           ${pctRow('Prob. profit',     stats.probProfit, statsAdj?.probProfit, '#66bb6a')}
           ${pctRow('Prob. gain > 10%', stats.probGain10, statsAdj?.probGain10, '#66bb6a')}
@@ -200,13 +199,13 @@ async function runSimulation() {
   destroyAll();
   $('results-section').style.display   = 'none';
   $('sentiment-section').style.display = 'none';
-  const sectorBadge = $('sector-badge');
-  if (sectorBadge) sectorBadge.style.display = 'none';
+  const sectorBadgeEl = $('sector-badge');
+  if (sectorBadgeEl) sectorBadgeEl.style.display = 'none';
   $('run-btn').disabled    = true;
   $('run-btn').textContent = 'Se ruleaza...';
 
   try {
-    // 1. Date istorice
+    // ── 1. Date istorice ─────────────────────────────
     setStatus(`Descarc date pentru ${ticker}...`);
     const stock = await fetchStockData(ticker);
     const { closes, dates, currentPrice, currency, name } = stock;
@@ -215,32 +214,41 @@ async function runSimulation() {
     $('stock-ticker').textContent = ticker;
     drawPriceHistory('price-chart', dates.slice(-60), closes.slice(-60), ticker);
 
-    // 2. Parametri GBM
+    // ── 2. Parametri GBM ─────────────────────────────
     setStatus('Calculez parametri GBM...');
     const { drift, sigma } = calcParams(closes);
     $('info-sigma').textContent = `${(sigma * 100).toFixed(3)}%/zi`;
     $('info-vol').textContent   = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}%/an`;
     $('info-drift').textContent = `${(drift * 100).toFixed(4)}%/zi`;
 
-    // 3. Sentiment + Sector + VIX
+    // ── 3. Sector + VIX (independent, intotdeauna rulat) ─
+    setStatus('Detectez sector si VIX...');
+    let sectorWeights = null;
+    let vixData       = { vix: null, vixLabel: 'N/A', vixImpact: 0 };
+    try {
+      const sectorInfo = await fetchSectorData(ticker);
+      sectorWeights    = sectorInfo.weights;
+      vixData          = await fetchVIX();
+      renderSectorBadge(sectorInfo.sector, sectorInfo.industry, vixData, sectorInfo.weights);
+    } catch (e) {
+      console.warn('Sector/VIX error:', e);
+    }
+
+    // ── 4. Sentiment AI ──────────────────────────────
     let sentimentData = null;
     let driftAdj = null, sigmaAdj = null;
-    let vixData  = { vix: null, vixLabel: 'N/A', vixImpact: 0 };
 
     if (doSentiment) {
-      setStatus('Analizez sentiment...');
+      setStatus('Analizez sentiment (Yahoo + Reuters + Google News)...');
       try {
         sentimentData = await analyzeSentiment(ticker, name, msg => setStatus(msg));
-        vixData       = sentimentData.vix;
-
-        renderSectorBadge(sentimentData.sector, sentimentData.industry,
-                          vixData, sentimentData.sectorWeights);
+        if (sentimentData.sectorWeights) sectorWeights = sentimentData.sectorWeights;
+        if (sentimentData.vix?.vix)      vixData       = sentimentData.vix;
 
         const scores = Object.values(sentimentData.factori).map(f => f.scor);
-        const adj    = adjustParams(drift, sigma, scores,
-                                    sentimentData.sectorWeights, vixData.vixImpact);
-        driftAdj = adj.driftAdj;
-        sigmaAdj = adj.sigmaAdj;
+        const adj    = adjustParams(drift, sigma, scores, sectorWeights, vixData.vixImpact);
+        driftAdj     = adj.driftAdj;
+        sigmaAdj     = adj.sigmaAdj;
 
         $('sent-global').textContent = `${sentimentData.sentimentGlobal >= 0 ? '+' : ''}${sentimentData.sentimentGlobal.toFixed(3)}`;
         $('sent-global').style.color = sentimentData.sentimentGlobal > 0.1 ? '#66bb6a'
@@ -275,7 +283,7 @@ async function runSimulation() {
       }
     }
 
-    // 4. Monte Carlo
+    // ── 5. Monte Carlo ───────────────────────────────
     const PERIODS       = [30, 90, 180, 360];
     const periodResults = {};
     for (const days of PERIODS) {
@@ -296,11 +304,11 @@ async function runSimulation() {
 
     currentResult = { stock, periodResults, sentimentData, drift, sigma, driftAdj, sigmaAdj };
 
-    // 5. Salveaza istoric
+    // ── 6. Salveaza istoric ──────────────────────────
     saveIstoric(ticker, `${currency} ${fmt(currentPrice)}`);
     renderIstoric();
 
-    // 6. Randare
+    // ── 7. Randare rezultate ─────────────────────────
     setStatus('');
     $('results-section').style.display = 'block';
     const tabsEl = $('period-tabs');

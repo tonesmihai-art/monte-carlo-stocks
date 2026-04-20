@@ -73,13 +73,14 @@ async function fetchStockData(ticker) {
   const result = data?.chart?.result?.[0];
   if (!result) throw new Error('Ticker invalid sau date indisponibile');
   const closes     = result.indicators.quote[0].close.filter(Boolean);
+  const volumes    = result.indicators.quote[0].volume || [];
   const timestamps = result.timestamp;
   const dates      = timestamps.map(ts =>
     new Date(ts * 1000).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short' })
   ).filter((_, i) => result.indicators.quote[0].close[i] != null);
   const meta = result.meta;
   return {
-    closes, dates,
+    closes, dates, volumes,
     currentPrice: closes[closes.length - 1],
     ticker:       meta.symbol,
     currency:     meta.currency || 'USD',
@@ -208,7 +209,7 @@ async function runSimulation() {
     // ── 1. Date istorice ─────────────────────────────
     setStatus(`Descarc date pentru ${ticker}...`);
     const stock = await fetchStockData(ticker);
-    const { closes, dates, currentPrice, currency, name } = stock;
+    const { closes, dates, volumes, currentPrice, currency, name } = stock;
     $('stock-name').textContent   = name;
     $('stock-price').textContent  = `${currency} ${fmt(currentPrice)}`;
     $('stock-ticker').textContent = ticker;
@@ -216,11 +217,12 @@ async function runSimulation() {
 
     // ── 2. Parametri GBM ─────────────────────────────
     setStatus('Calculez parametri GBM...');
-    const { drift, sigma, mean50, deviationPct } = calcParams(closes);
+    const { drift, sigma, mean50, deviationPct, volumeTrend } = calcParams(closes, volumes);
     $('info-sigma').textContent = `${(sigma * 100).toFixed(3)}%/zi`;
     $('info-vol').textContent   = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}%/an`;
-    $('info-drift').textContent = `${(drift * 100).toFixed(4)}%/zi`;
-    $('info-ma50').textContent  = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
+    $('info-drift').textContent  = `${(drift * 100).toFixed(4)}%/zi`;
+    $('info-ma50').textContent   = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
+    $('info-voltren').textContent = volumeTrend?.label ?? '—';
 
     // ── 3. Sector + VIX (independent, intotdeauna rulat) ─
     setStatus('Detectez sector si VIX...');
@@ -247,9 +249,9 @@ async function runSimulation() {
         if (sentimentData.vix?.vix)      vixData       = sentimentData.vix;
 
         const scores = Object.values(sentimentData.factori).map(f => f.scor);
-        const adj    = adjustParams(drift, sigma, scores, sectorWeights, vixData.vixImpact, deviationPct);
-        driftAdj     = adj.driftAdj;
-        sigmaAdj     = adj.sigmaAdj;
+        const adj    = adjustParams(drift, sigma, scores, sectorWeights, vixData.vixImpact, deviationPct, volumeTrend?.score ?? 0);
+        driftAdj        = adj.driftAdj;
+        sigmaAdj        = adj.sigmaAdj;
         meanRevStrength = adj.meanRevStrength ?? 0;
 
         $('sent-global').textContent = `${sentimentData.sentimentGlobal >= 0 ? '+' : ''}${sentimentData.sentimentGlobal.toFixed(3)}`;

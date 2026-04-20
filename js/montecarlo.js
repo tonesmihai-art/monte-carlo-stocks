@@ -3,7 +3,7 @@
 //  pret_nou = pret_vechi * exp(drift + sigma * Z)
 // ─────────────────────────────────────────────────────
 
-const NUM_SIMS = 30_000;
+const NUM_SIMS = 50_000;
 
 // Box-Muller: generam numere aleatoare cu distributie normala
 function randNormal() {
@@ -116,13 +116,34 @@ export function percentilesPerDay(matrix, days, pcts = [10, 50, 90]) {
   return result;
 }
 
-// Ajustare parametri GBM pe baza sentiment scores
-export function adjustParams(drift, sigma, sentimentScores) {
-  if (!sentimentScores || sentimentScores.length === 0) return { driftAdj: drift, sigmaAdj: sigma };
-  const avg     = sentimentScores.reduce((a, b) => a + b, 0) / sentimentScores.length;
-  const absAvg  = Math.abs(avg);
+// Ajustare parametri GBM pe baza sentiment scores + sector weights + VIX
+export function adjustParams(drift, sigma, sentimentScores, sectorWeights = null, vixImpact = 0) {
+  if (!sentimentScores || sentimentScores.length === 0) {
+    return { driftAdj: drift, sigmaAdj: sigma };
+  }
+
+  const FACTOR_KEYS = ['geopolitic','inflatie_dobanzi','crize_financiare',
+                       'pandemii_sanatate','tarife_comerciale','alegeri_politice','stiri_companie'];
+
+  let weightedSum = 0;
+  let totalWeight = 0;
+
+  sentimentScores.forEach((score, i) => {
+    const key = FACTOR_KEYS[i];
+    const w   = sectorWeights?.[key] ?? 1.0;
+    weightedSum += score * w;
+    totalWeight += w;
+  });
+
+  const avg    = totalWeight > 0 ? weightedSum / totalWeight : 0;
+  const absAvg = Math.abs(avg);
+
+  // Drift: sentiment pozitiv ponderat pe sector creste drift-ul
   const driftAdj = drift + avg * 0.0002;
-  const sigmaAdj = sigma * (1 + absAvg * 0.3);
+
+  // Sigma: sentiment extrem + VIX ridicat = volatilitate mai mare
+  const sigmaAdj = sigma * (1 + absAvg * 0.3 + vixImpact);
+
   return { driftAdj, sigmaAdj };
 }
 

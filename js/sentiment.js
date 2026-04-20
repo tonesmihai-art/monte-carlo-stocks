@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────
 //  ANALIZA SENTIMENT — fara API key
 //  Surse: Yahoo Finance News + Reuters RSS + Google News
+//         + Seeking Alpha + Euronews Business
 //  Algoritm: VADER-lite implementat in JavaScript
 //  + Detectie sector + VIX
 // ─────────────────────────────────────────────────────
@@ -55,8 +56,6 @@ function vaderScore(text) {
 }
 
 // ── Ponderi per sector ────────────────────────────────
-// Fiecare sector defineste cat de mult conteaza fiecare din cei 7 factori
-// Valori: 0.0 (irelevant) → 2.0 (extrem de relevant)
 export const SECTOR_WEIGHTS = {
   'Technology': {
     geopolitic: 0.8, inflatie_dobanzi: 1.0, crize_financiare: 0.7,
@@ -139,8 +138,6 @@ export const SECTOR_WEIGHTS = {
 };
 
 // ── Fallback local pentru tickere frecvente ──────────
-// Folosit cand Yahoo Finance nu returneaza assetProfile
-// (tipic pentru .SW, .DE, .RO, .L, .AS prin proxy CORS)
 const TICKER_SECTOR_MAP = {
   // US — Technology
   'AAPL':   { sector: 'Technology',             industry: 'Consumer Electronics' },
@@ -248,7 +245,6 @@ const TICKER_SECTOR_MAP = {
 };
 
 // ── Detectie sector din Yahoo Finance ────────────────
-// Helper: fetch cu timeout ca sa nu atarne la nesfarsit
 async function fetchWithTimeout(url, ms = 4000) {
   const ctrl  = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
@@ -260,7 +256,6 @@ async function fetchWithTimeout(url, ms = 4000) {
 }
 
 export async function fetchSectorData(ticker) {
-  // Crypto detection
   if (ticker.includes('-USD') || ticker.includes('-EUR') ||
       ticker.includes('-BTC') || ['BTC','ETH','BNB','SOL','XRP'].includes(ticker)) {
     return { sector: 'Cryptocurrency', industry: 'Cryptocurrency', weights: SECTOR_WEIGHTS['Cryptocurrency'] };
@@ -268,15 +263,12 @@ export async function fetchSectorData(ticker) {
 
   const upper = ticker.toUpperCase();
 
-  // FAST PATH: daca tickerul e in map-ul local, returneaza imediat
-  // (evita complet call-ul lent prin proxy CORS)
   if (TICKER_SECTOR_MAP[upper]) {
     const { sector, industry } = TICKER_SECTOR_MAP[upper];
     const weights = SECTOR_WEIGHTS[sector] || SECTOR_WEIGHTS['Unknown'];
     return { sector, industry, weights };
   }
 
-  // Pentru tickere necunoscute: incearca Yahoo cu timeout scurt
   const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=assetProfile`;
   const proxies = [
     `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -300,11 +292,10 @@ export async function fetchSectorData(ticker) {
     }
   }
 
-  // Fallback final: Unknown
   return { sector: 'Unknown', industry: 'Unknown', weights: SECTOR_WEIGHTS['Unknown'] };
 }
 
-// ── Fetch VIX (indicele fricii) ───────────────────────
+// ── Fetch VIX ────────────────────────────────────────
 export async function fetchVIX() {
   try {
     const url   = 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d';
@@ -315,9 +306,7 @@ export async function fetchVIX() {
     if (!closes || closes.length === 0) return { vix: null, vixLabel: 'N/A', vixImpact: 0 };
 
     const vix = closes[closes.length - 1];
-    // VIX < 15 = piata calma, 15-25 = normal, 25-35 = stres, >35 = panica
     const vixLabel = vix < 15 ? '😴 Calm' : vix < 25 ? '😐 Normal' : vix < 35 ? '😟 Stres' : '🔥 Panica';
-    // Impact pe sigma: VIX mare => sigma mai mare in simulare
     const vixImpact = vix > 25 ? (vix - 25) / 100 : vix < 15 ? -(15 - vix) / 200 : 0;
     return { vix: +vix.toFixed(2), vixLabel, vixImpact };
   } catch (e) {
@@ -354,7 +343,7 @@ function assignFactor(title, ticker) {
   return 'stiri_companie';
 }
 
-// ── Descarcare stiri (toate PARALEL, cu timeout) ─────
+// ── Descarcare stiri — RSS via rss2json proxy ─────────
 async function fetchRss(url, sursa, limit = 25) {
   const titluri = [];
   try {
@@ -369,25 +358,26 @@ async function fetchRss(url, sursa, limit = 25) {
   return titluri;
 }
 
+// ── Yahoo Finance News ────────────────────────────────
 async function fetchYahooNews(ticker) {
   const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${ticker}&region=US&lang=en-US`;
   return fetchRss(rssUrl, 'Yahoo Finance', 50);
 }
 
+// ── Reuters Business + Finance RSS ───────────────────
 async function fetchReutersNews() {
   const feeds = [
     ['https://feeds.reuters.com/reuters/businessNews',  'Reuters Business'],
     ['https://feeds.reuters.com/reuters/financialNews', 'Reuters Finance'],
   ];
-  // Rulam feed-urile in paralel
   const results = await Promise.all(feeds.map(([u, s]) => fetchRss(u, s, 25)));
   return results.flat();
 }
 
+// ── Google News ───────────────────────────────────────
 async function fetchGoogleNews(ticker, companyName) {
   const queries = [ticker, `${ticker} stock`];
   if (companyName && companyName !== ticker) queries.push(companyName.split(' ')[0]);
-  // Rulam query-urile in paralel
   const results = await Promise.all(queries.map(q => {
     const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
     return fetchRss(rssUrl, 'Google News', 20);
@@ -395,25 +385,56 @@ async function fetchGoogleNews(ticker, companyName) {
   return results.flat();
 }
 
+// ── Seeking Alpha — stiri per ticker ─────────────────
+// RSS filtrat direct pe simbolul cautat: analisti independenti, opinie profunda
+async function fetchSeekingAlphaNews(ticker) {
+  // Ticker fara sufix de bursa (OMV.DE → OMV, TLV.RO → TLV)
+  const sym    = ticker.split('.')[0].split('-')[0];
+  const rssUrl = `https://seekingalpha.com/symbol/${sym}/news.xml`;
+  return fetchRss(rssUrl, 'Seeking Alpha', 30);
+}
+
+// ── Euronews Business RSS ─────────────────────────────
+// Stiri economice europene independente — util mai ales pentru .DE, .RO, .SW, .L
+async function fetchEuronewsNews() {
+  const feeds = [
+    ['https://feeds.euronews.com/feeds/rss/business.xml', 'Euronews Business'],
+    ['https://feeds.euronews.com/feeds/rss/economy.xml',  'Euronews Economy'],
+  ];
+  const results = await Promise.all(feeds.map(([u, s]) => fetchRss(u, s, 20)));
+  return results.flat();
+}
+
 // ── Analiza principala ────────────────────────────────
 export async function analyzeSentiment(ticker, companyName, onProgress) {
   onProgress?.('Descarc sector, VIX si stiri (paralel)...');
-  // Rulam toate fetch-urile simultan, nu secvential
+
+  // Toate fetch-urile simultan — inclusiv Seeking Alpha si Euronews
   const [
     { sector, industry, weights },
     vixData,
     yahooNews,
     reutersNews,
     googleNews,
+    seekingAlphaNews,
+    euronewsNews,
   ] = await Promise.all([
     fetchSectorData(ticker),
     fetchVIX(),
     fetchYahooNews(ticker),
     fetchReutersNews(),
     fetchGoogleNews(ticker, companyName),
+    fetchSeekingAlphaNews(ticker),
+    fetchEuronewsNews(),
   ]);
 
-  const all = [...yahooNews, ...reutersNews, ...googleNews];
+  const all = [
+    ...yahooNews,
+    ...reutersNews,
+    ...googleNews,
+    ...seekingAlphaNews,
+    ...euronewsNews,
+  ];
 
   // Deduplicare
   const seen  = new Set();
@@ -448,13 +469,13 @@ export async function analyzeSentiment(ticker, companyName, onProgress) {
     stiri_companie:    '📰 Stiri companie',
   };
 
-  const factoriResult = {};
+  const factoriResult  = {};
   const weightedScores = [];
   let totalWeight      = 0;
 
   FACTORS.forEach(factor => {
-    const items  = buckets[factor];
-    const scor   = items.length > 0
+    const items = buckets[factor];
+    const scor  = items.length > 0
       ? items.reduce((s, i) => s + i.score, 0) / items.length
       : 0;
 
@@ -463,37 +484,38 @@ export async function analyzeSentiment(ticker, companyName, onProgress) {
     totalWeight += w;
 
     factoriResult[factor] = {
-      scor:    +scor.toFixed(3),
-      weight:  +w.toFixed(1),        // ponderea sectorului
-      label:   LABELS[factor],
-      impact:  scor > 0.1 ? 'bullish' : scor < -0.1 ? 'bearish' : 'neutru',
-      count:   items.length,
-      stiri:   items.slice(0, 5),
+      scor:   +scor.toFixed(3),
+      weight: +w.toFixed(1),
+      label:  LABELS[factor],
+      impact: scor > 0.1 ? 'bullish' : scor < -0.1 ? 'bearish' : 'neutru',
+      count:  items.length,
+      stiri:  items.slice(0, 5),
     };
   });
 
-  // Scor global ponderat pe sector
   const globalScore = totalWeight > 0
     ? weightedScores.reduce((a, b) => a + b, 0) / totalWeight
     : 0;
 
-  const pozitive = FACTORS.filter(f => factoriResult[f].scor > 0.1).length;
-  const negative = FACTORS.filter(f => factoriResult[f].scor < -0.1).length;
+  const pozitive  = FACTORS.filter(f => factoriResult[f].scor > 0.1).length;
+  const negative  = FACTORS.filter(f => factoriResult[f].scor < -0.1).length;
   const rawScores = FACTORS.map(f => factoriResult[f].scor);
 
   return {
     ticker,
     sector,
     industry,
-    sectorWeights:    weights,
-    vix:              vixData,
-    factori:          factoriResult,
-    sentimentGlobal:  +globalScore.toFixed(3),
-    totalStiri:       unice.length,
+    sectorWeights:   weights,
+    vix:             vixData,
+    factori:         factoriResult,
+    sentimentGlobal: +globalScore.toFixed(3),
+    totalStiri:      unice.length,
     surse: {
-      yahoo:   yahooNews.length,
-      reuters: reutersNews.length,
-      google:  googleNews.length,
+      yahoo:         yahooNews.length,
+      reuters:       reutersNews.length,
+      google:        googleNews.length,
+      seekingAlpha:  seekingAlphaNews.length,
+      euronews:      euronewsNews.length,
     },
     scores:   rawScores,
     concluzie: globalScore > 0.1

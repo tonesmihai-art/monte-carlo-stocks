@@ -6,7 +6,7 @@ import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS } from './montecarlo.js';
 import { analyzeSentiment, fetchSectorData, fetchVIX } from './sentiment.js';
 import { drawPriceHistory, drawTrajectories,
-         drawHistogram, drawSentiment, destroyAll } from './charts.js';
+         drawHistogram, drawSentiment, destroyAll, destroyPeriodCharts } from './charts.js';
 
 // ── Service Worker ────────────────────────────────────
 if ('serviceWorker' in navigator) {
@@ -365,7 +365,7 @@ async function runSimulation() {
       btn.onclick     = () => {
         tabsEl.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        destroyAll();
+        destroyPeriodCharts(); // doar traj+hist, sentimentul ramine intact
         renderPeriod(periodResults[days], days);
       };
       tabsEl.appendChild(btn);

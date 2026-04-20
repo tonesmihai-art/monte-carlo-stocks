@@ -10,11 +10,17 @@ const ASSETS = [
   'https://cdn.jsdelivr.net/npm/chart.js',
 ];
 
+
+
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c => c.addAll(ASSETS.filter(a => !a.startsWith('http'))))
   );
   self.skipWaiting();
+});
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting(); // Forțează worker-ul nou să devină activ imediat
 });
 
 self.addEventListener('activate', e => {

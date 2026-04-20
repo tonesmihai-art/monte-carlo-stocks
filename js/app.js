@@ -4,7 +4,8 @@
 
 import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS } from './montecarlo.js';
-import { analyzeSentiment } from './sentiment.js';
+// CUM TREBUIE SA FIE:
+import { analyzeSentiment, fetchSectorData, fetchVIX } from './sentiment.js';
 import { drawPriceHistory, drawTrajectories,
          drawHistogram, drawSentiment, destroyAll } from './charts.js';
 

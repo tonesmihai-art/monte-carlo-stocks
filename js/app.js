@@ -119,10 +119,51 @@ function renderSectorBadge(sector, industry, vixData, weights) {
                  : vixData.vix < 25 ? '#ffee58'
                  : vixData.vix < 35 ? '#ffa726'
                  : '#ef5350';
+
+  // Determina descrierea impactului VIX
+  const vixImpactDesc = !vixData?.vix
+    ? 'Date VIX indisponibile.'
+    : vixData.vix < 15
+      ? 'Piata <strong style="color:#66bb6a">calma</strong> — sigma neschimbata in simulare.'
+      : vixData.vix < 25
+        ? 'Volatilitate <strong style="color:#ffee58">normala</strong> — impact redus asupra sigmei.'
+        : vixData.vix < 35
+          ? 'Volatilitate <strong style="color:#ffa726">ridicata</strong> — sigma creste +20% in simulare.'
+          : 'Piata in <strong style="color:#ef5350">panica</strong> — sigma creste +40% in simulare.';
+
   el.innerHTML = `
-    <span class="sector-chip" title="${industry}">${emoji} ${sector}</span>
-    <span class="vix-chip" style="color:${vixColor}" title="VIX — Indicele fricii pietei">
-      VIX: ${vixData?.vix ?? 'N/A'} ${vixData?.vixLabel ?? ''}
+    <span class="tip-wrap">
+      <span class="sector-chip">${emoji} ${sector}</span>
+      <i class="tip-icon" style="border-color:rgba(79,195,247,0.4)">i</i>
+      <div class="tip-bubble">
+        <strong>🏭 Sector — ${sector}</strong>
+        ${industry ? `<em style="color:#aaa;font-size:10px">${industry}</em><br><br>` : ''}
+        Sectorul determina <b>ponderile</b> celor 7 factori de sentiment. Fiecare sector amplifica factorii cei mai relevanti:
+        <div class="tip-scale" style="margin-top:6px">
+          <div class="tip-scale-row"><span class="tip-dot" style="background:#4fc3f7"></span> Energy → geopolitica + tarife</div>
+          <div class="tip-scale-row"><span class="tip-dot" style="background:#ce93d8"></span> Technology → reglementari + inovatie</div>
+          <div class="tip-scale-row"><span class="tip-dot" style="background:#ffcc02"></span> Financial → macro + dobânzi</div>
+        </div>
+        <span class="tip-impact">Influenteaza: ponderile sentimentului AI</span>
+      </div>
+    </span>
+    <span class="tip-wrap">
+      <span class="vix-chip" style="color:${vixColor}">
+        VIX: ${vixData?.vix ?? 'N/A'} ${vixData?.vixLabel ?? ''}
+      </span>
+      <i class="tip-icon" style="border-color:${vixColor};color:${vixColor};background:transparent">i</i>
+      <div class="tip-bubble">
+        <strong>😱 VIX — Indicele fricii pietei</strong>
+        Masoara volatilitatea <em>implicita</em> asteptata de piata pe urmatoarele 30 de zile. Cu cat e mai mare, cu atat piata anticipeaza miscari bruste.
+        <div class="tip-scale" style="margin-top:6px">
+          <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 15 — piata calma, sigma normala</div>
+          <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 15–25 — normal, impact minor</div>
+          <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> 25–35 — ingrijorare, sigma +20%</div>
+          <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 35 — panica, sigma +40%</div>
+        </div>
+        <div style="margin-top:6px;font-size:10.5px">${vixImpactDesc}</div>
+        <span class="tip-impact">Influenteaza: sigma in simulare</span>
+      </div>
     </span>
   `;
   el.style.display = 'flex';

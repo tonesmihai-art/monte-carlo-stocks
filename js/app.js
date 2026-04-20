@@ -21,7 +21,7 @@ const $ = id => document.getElementById(id);
 
 // ── Istoric localStorage ──────────────────────────────
 const ISTORIC_KEY = 'istoricSimulari';
-const MAX_ISTORIC = 10;
+const MAX_ISTORIC = 30;
 
 function loadIstoric() {
   try { return JSON.parse(localStorage.getItem(ISTORIC_KEY)) || []; }

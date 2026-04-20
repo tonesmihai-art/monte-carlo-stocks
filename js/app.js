@@ -300,7 +300,7 @@ async function runSimulation() {
                                      : sentimentData.sentimentGlobal < -0.1 ? '#ef5350' : '#ffee58';
         $('sent-conclusion').textContent = sentimentData.concluzie;
         $('sent-sources').textContent =
-          `Yahoo: ${sentimentData.surse.yahoo} | Reuters: ${sentimentData.surse.reuters} | Google: ${sentimentData.surse.google} | Total: ${sentimentData.totalStiri} stiri unice`;
+          `Yahoo: ${sentimentData.surse.yahoo} | Reuters: ${sentimentData.surse.reuters} | Google: ${sentimentData.surse.google} | Seeking Alpha: ${sentimentData.surse.seekingAlpha} | Euronews: ${sentimentData.surse.euronews} | Total: ${sentimentData.totalStiri} stiri unice`;
 
         drawSentiment('sentiment-chart', sentimentData);
         $('sentiment-section').style.display = 'block';

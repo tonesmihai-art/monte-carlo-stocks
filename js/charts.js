@@ -21,8 +21,9 @@ const COLORS = {
 };
 
 function destroyAll() {
-  [trajChart, histChart, sentChart, priceChart].forEach(c => c?.destroy());
-  trajChart = histChart = sentChart = priceChart = null;
+  // priceChart NU se distruge — graficul istoric ramine persistent intre tab-uri
+  [trajChart, histChart, sentChart].forEach(c => c?.destroy());
+  trajChart = histChart = sentChart = null;
 }
 
 // ── Grafic pret istoric ───────────────────────────────

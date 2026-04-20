@@ -388,13 +388,14 @@ async function fetchYahooNews(ticker) {
   return fetchRss(rssUrl, 'Yahoo Finance', 50);
 }
 
-// ── Reuters Business + Finance RSS ───────────────────
+// ── AP Business + CNBC — inlocuiesc Reuters (RSS-urile Reuters sunt moarte din 2020)
 async function fetchReutersNews() {
   const feeds = [
-    ['https://feeds.reuters.com/reuters/businessNews',  'Reuters Business'],
-    ['https://feeds.reuters.com/reuters/financialNews', 'Reuters Finance'],
+    ['https://feeds.apnews.com/rss/apf-business',                                     'AP Business'],
+    ['https://www.cnbc.com/id/10000664/device/rss/rss.html',                          'CNBC Markets'],
+    ['https://www.cnbc.com/id/100003114/device/rss/rss.html',                         'CNBC Finance'],
   ];
-  const results = await Promise.all(feeds.map(([u, s]) => fetchRss(u, s, 25)));
+  const results = await Promise.all(feeds.map(([u, s]) => fetchRss(u, s, 20)));
   return results.flat();
 }
 
@@ -409,24 +410,35 @@ async function fetchGoogleNews(ticker, companyName) {
   return results.flat();
 }
 
-// ── Seeking Alpha — stiri per ticker ─────────────────
-// RSS filtrat direct pe simbolul cautat: analisti independenti, opinie profunda
+// ── Seeking Alpha — feed general de piata ────────────
+// RSS per ticker necesita cont platit — folosim feed-ul general public
 async function fetchSeekingAlphaNews(ticker) {
-  // Ticker fara sufix de bursa (OMV.DE → OMV, TLV.RO → TLV)
-  const sym    = ticker.split('.')[0].split('-')[0];
-  const rssUrl = `https://seekingalpha.com/symbol/${sym}/news.xml`;
-  return fetchRss(rssUrl, 'Seeking Alpha', 30);
+  const sym = ticker.split('.')[0].split('-')[0];
+  // Incercam mai intai feed-ul per ticker, apoi feed-ul general
+  const feeds = [
+    [`https://seekingalpha.com/symbol/${sym}/news.xml`,      'Seeking Alpha'],
+    [`https://seekingalpha.com/feed.xml`,                    'Seeking Alpha'],
+  ];
+  for (const [url, sursa] of feeds) {
+    const rezultate = await fetchRss(url, sursa, 25);
+    if (rezultate.length > 0) return rezultate;
+  }
+  return [];
 }
 
 // ── Euronews Business RSS ─────────────────────────────
-// Stiri economice europene independente — util mai ales pentru .DE, .RO, .SW, .L
 async function fetchEuronewsNews() {
   const feeds = [
-    ['https://feeds.euronews.com/feeds/rss/business.xml', 'Euronews Business'],
-    ['https://feeds.euronews.com/feeds/rss/economy.xml',  'Euronews Economy'],
+    ['https://euronews.com/rss?level=theme&name=business',   'Euronews Business'],
+    ['https://www.euronews.com/rss?level=theme&name=business','Euronews Business'],
+    ['https://feeds.euronews.com/feeds/rss/business.xml',    'Euronews Business'],
   ];
-  const results = await Promise.all(feeds.map(([u, s]) => fetchRss(u, s, 20)));
-  return results.flat();
+  // Incercam fiecare URL pana gasim unul care functioneaza
+  for (const [url, sursa] of feeds) {
+    const rezultate = await fetchRss(url, sursa, 25);
+    if (rezultate.length > 0) return rezultate;
+  }
+  return [];
 }
 
 // ── Analiza principala ────────────────────────────────

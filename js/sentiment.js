@@ -138,31 +138,6 @@ export const SECTOR_WEIGHTS = {
   },
 };
 
-// ── Detectie sector din Yahoo Finance ────────────────
-//export async function fetchSectorData(ticker) {
-  // Crypto detection
- // if (ticker.includes('-USD') || ticker.includes('-EUR') ||
-  //    ticker.includes('-BTC') || ['BTC','ETH','BNB','SOL','XRP'].includes(ticker)) {
-  //  return { sector: 'Cryptocurrency', industry: 'Cryptocurrency', weights: SECTOR_WEIGHTS['Cryptocurrency'] };
-  //}
-
-  //try {
-  //  const url   = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=assetProfile`;
-  //  const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-   // const r     = await fetch(proxy);
-  //  const data  = await r.json();
-  //  const profile = data?.quoteSummary?.result?.[0]?.assetProfile;
-  //  const sector  = profile?.sector || 'Unknown';
-  //  const industry = profile?.industry || 'Unknown';
-  //  const weights = SECTOR_WEIGHTS[sector] || SECTOR_WEIGHTS['Unknown'];
-  //  return { sector, industry, weights };
- // } catch (e) {
-   // console.warn('Sector fetch failed:', e);
-   // return { sector: 'Unknown', industry: 'Unknown', weights: SECTOR_WEIGHTS['Unknown'] };
-  //}
-//}
-
-
 // ── Fallback local pentru tickere frecvente ──────────
 // Folosit cand Yahoo Finance nu returneaza assetProfile
 // (tipic pentru .SW, .DE, .RO, .L, .AS prin proxy CORS)
@@ -208,6 +183,17 @@ const TICKER_SECTOR_MAP = {
 };
 
 // ── Detectie sector din Yahoo Finance ────────────────
+// Helper: fetch cu timeout ca sa nu atarne la nesfarsit
+async function fetchWithTimeout(url, ms = 4000) {
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function fetchSectorData(ticker) {
   // Crypto detection
   if (ticker.includes('-USD') || ticker.includes('-EUR') ||
@@ -215,7 +201,17 @@ export async function fetchSectorData(ticker) {
     return { sector: 'Cryptocurrency', industry: 'Cryptocurrency', weights: SECTOR_WEIGHTS['Cryptocurrency'] };
   }
 
-  // Incearca Yahoo Finance (cu doua proxy-uri de rezerva)
+  const upper = ticker.toUpperCase();
+
+  // FAST PATH: daca tickerul e in map-ul local, returneaza imediat
+  // (evita complet call-ul lent prin proxy CORS)
+  if (TICKER_SECTOR_MAP[upper]) {
+    const { sector, industry } = TICKER_SECTOR_MAP[upper];
+    const weights = SECTOR_WEIGHTS[sector] || SECTOR_WEIGHTS['Unknown'];
+    return { sector, industry, weights };
+  }
+
+  // Pentru tickere necunoscute: incearca Yahoo cu timeout scurt
   const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=assetProfile`;
   const proxies = [
     `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -224,7 +220,7 @@ export async function fetchSectorData(ticker) {
 
   for (const proxyUrl of proxies) {
     try {
-      const r = await fetch(proxyUrl);
+      const r = await fetchWithTimeout(proxyUrl, 4000);
       if (!r.ok) continue;
       const data     = await r.json();
       const profile  = data?.quoteSummary?.result?.[0]?.assetProfile;
@@ -235,20 +231,11 @@ export async function fetchSectorData(ticker) {
         return { sector, industry: industry || sector, weights };
       }
     } catch (e) {
-      console.warn('Sector fetch failed via proxy:', e);
+      console.warn('Sector fetch timeout/fail:', e.message);
     }
   }
 
-  // Fallback 1: map local pentru tickere cunoscute
-  const upper = ticker.toUpperCase();
-  if (TICKER_SECTOR_MAP[upper]) {
-    const { sector, industry } = TICKER_SECTOR_MAP[upper];
-    const weights = SECTOR_WEIGHTS[sector] || SECTOR_WEIGHTS['Unknown'];
-    console.info(`Sector din map local pentru ${upper}: ${sector}`);
-    return { sector, industry, weights };
-  }
-
-  // Fallback 2: Unknown
+  // Fallback final: Unknown
   return { sector: 'Unknown', industry: 'Unknown', weights: SECTOR_WEIGHTS['Unknown'] };
 }
 
@@ -257,7 +244,7 @@ export async function fetchVIX() {
   try {
     const url   = 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d';
     const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-    const r     = await fetch(proxy, { signal: AbortSignal.timeout(4000) });
+    const r     = await fetchWithTimeout(proxy, 4000);
     const data  = await r.json();
     const closes = data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(Boolean);
     if (!closes || closes.length === 0) return { vix: null, vixLabel: 'N/A', vixImpact: 0 };
@@ -302,74 +289,64 @@ function assignFactor(title, ticker) {
   return 'stiri_companie';
 }
 
-// ── Descarcare stiri ──────────────────────────────────
-async function fetchYahooNews(ticker) {
+// ── Descarcare stiri (toate PARALEL, cu timeout) ─────
+async function fetchRss(url, sursa, limit = 25) {
   const titluri = [];
   try {
-    const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${ticker}&region=US&lang=en-US`;
-    const proxy  = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
-    const r      = await fetch(proxy);
-    const data   = await r.json();
-    (data.items || []).forEach(item => {
-      if (item.title) titluri.push({ titlu: item.title, sursa: 'Yahoo Finance' });
+    const proxy = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`;
+    const r     = await fetchWithTimeout(proxy, 6000);
+    if (!r.ok) return titluri;
+    const data  = await r.json();
+    (data.items || []).slice(0, limit).forEach(item => {
+      if (item.title) titluri.push({ titlu: item.title, sursa });
     });
-  } catch (e) { console.warn('Yahoo RSS:', e); }
+  } catch (e) { console.warn(`${sursa} timeout/fail:`, e.message); }
   return titluri;
+}
+
+async function fetchYahooNews(ticker) {
+  const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${ticker}&region=US&lang=en-US`;
+  return fetchRss(rssUrl, 'Yahoo Finance', 50);
 }
 
 async function fetchReutersNews() {
-  const titluri = [];
-  const feeds   = [
-    { url: 'https://feeds.reuters.com/reuters/businessNews',  sursa: 'Reuters Business' },
-    { url: 'https://feeds.reuters.com/reuters/financialNews', sursa: 'Reuters Finance' },
+  const feeds = [
+    ['https://feeds.reuters.com/reuters/businessNews',  'Reuters Business'],
+    ['https://feeds.reuters.com/reuters/financialNews', 'Reuters Finance'],
   ];
-  for (const { url, sursa } of feeds) {
-    try {
-      const proxy = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`;
-      const r     = await fetch(proxy);
-      const data  = await r.json();
-      (data.items || []).slice(0, 25).forEach(item => {
-        if (item.title) titluri.push({ titlu: item.title, sursa });
-      });
-    } catch (e) { console.warn(`${sursa}:`, e); }
-  }
-  return titluri;
+  // Rulam feed-urile in paralel
+  const results = await Promise.all(feeds.map(([u, s]) => fetchRss(u, s, 25)));
+  return results.flat();
 }
 
 async function fetchGoogleNews(ticker, companyName) {
-  const titluri = [];
   const queries = [ticker, `${ticker} stock`];
   if (companyName && companyName !== ticker) queries.push(companyName.split(' ')[0]);
-  for (const q of queries) {
-    try {
-      const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
-      const proxy  = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
-      const r      = await fetch(proxy);
-      const data   = await r.json();
-      (data.items || []).slice(0, 20).forEach(item => {
-        if (item.title) titluri.push({ titlu: item.title, sursa: 'Google News' });
-      });
-    } catch (e) { console.warn('Google News:', e); }
-  }
-  return titluri;
+  // Rulam query-urile in paralel
+  const results = await Promise.all(queries.map(q => {
+    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+    return fetchRss(rssUrl, 'Google News', 20);
+  }));
+  return results.flat();
 }
 
 // ── Analiza principala ────────────────────────────────
 export async function analyzeSentiment(ticker, companyName, onProgress) {
-  onProgress?.('Detectez sectorul...');
-  const { sector, industry, weights } = await fetchSectorData(ticker);
-
-  onProgress?.('Fetch VIX...');
-  const vixData = await fetchVIX();
-
-  onProgress?.('Yahoo Finance...');
-  const yahooNews   = await fetchYahooNews(ticker);
-
-  onProgress?.('Reuters RSS...');
-  const reutersNews = await fetchReutersNews();
-
-  onProgress?.('Google News...');
-  const googleNews  = await fetchGoogleNews(ticker, companyName);
+  onProgress?.('Descarc sector, VIX si stiri (paralel)...');
+  // Rulam toate fetch-urile simultan, nu secvential
+  const [
+    { sector, industry, weights },
+    vixData,
+    yahooNews,
+    reutersNews,
+    googleNews,
+  ] = await Promise.all([
+    fetchSectorData(ticker),
+    fetchVIX(),
+    fetchYahooNews(ticker),
+    fetchReutersNews(),
+    fetchGoogleNews(ticker, companyName),
+  ]);
 
   const all = [...yahooNews, ...reutersNews, ...googleNews];
 

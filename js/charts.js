@@ -20,10 +20,18 @@ const COLORS = {
   blueAI:    '#b3e5fc',
 };
 
+// Distruge TOATE graficele (folosit la inceput de simulare noua)
 function destroyAll() {
   // priceChart NU se distruge — graficul istoric ramine persistent intre tab-uri
   [trajChart, histChart, sentChart].forEach(c => c?.destroy());
   trajChart = histChart = sentChart = null;
+}
+
+// Distruge DOAR graficele de perioade (traj + hist) — folosit la schimbarea tab-urilor
+// Lasa sentimentul intact!
+function destroyPeriodCharts() {
+  [trajChart, histChart].forEach(c => c?.destroy());
+  trajChart = histChart = null;
 }
 
 // ── Grafic pret istoric ───────────────────────────────
@@ -297,4 +305,4 @@ export function drawSentiment(canvasId, sentimentData) {
   });
 }
 
-export { destroyAll };
+export { destroyAll, destroyPeriodCharts };

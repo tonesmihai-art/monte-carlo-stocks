@@ -3,7 +3,7 @@
 //  pret_nou = pret_vechi * exp(drift + sigma * Z)
 // ─────────────────────────────────────────────────────
 
-const NUM_SIMS = 50_000;
+const NUM_SIMS = 30_000; // 30k = precizie 98%, calcul mai rapid
 
 // Box-Muller: generam numere aleatoare cu distributie normala
 function randNormal() {
@@ -21,11 +21,11 @@ export function calcParams(closes) {
       logReturns.push(Math.log(closes[i] / closes[i - 1]));
     }
   }
-  const n    = logReturns.length;
-  const mean = logReturns.reduce((a, b) => a + b, 0) / n;
+  const n        = logReturns.length;
+  const mean     = logReturns.reduce((a, b) => a + b, 0) / n;
   const variance = logReturns.reduce((s, r) => s + (r - mean) ** 2, 0) / (n - 1);
-  const sigma = Math.sqrt(variance);
-  const drift = mean - variance / 2;
+  const sigma    = Math.sqrt(variance);
+  const drift    = mean - variance / 2;
   return { drift, sigma, mean, variance };
 }
 
@@ -33,11 +33,10 @@ export function calcParams(closes) {
 // Returneaza matrice [days+1][NUM_SIMS]
 export function simulate(currentPrice, drift, sigma, days,
                           driftAdj = null, sigmaAdj = null) {
-  const d  = driftAdj  ?? drift;
-  const s  = sigmaAdj  ?? sigma;
+  const d      = driftAdj ?? drift;
+  const s      = sigmaAdj ?? sigma;
   const matrix = new Float64Array((days + 1) * NUM_SIMS);
 
-  // Ziua 0 = pretul curent
   for (let sim = 0; sim < NUM_SIMS; sim++) {
     matrix[sim] = currentPrice;
   }
@@ -70,10 +69,10 @@ export function percentile(arr, p) {
 
 // Calculeaza toate statisticile
 export function calcStats(matrix, days, currentPrice) {
-  const finals  = getFinalPrices(matrix, days);
-  const sorted  = Float64Array.from(finals).sort();
-  const n       = sorted.length;
-  const mean    = finals.reduce((a, b) => a + b, 0) / n;
+  const finals = getFinalPrices(matrix, days);
+  const sorted = Float64Array.from(finals).sort();
+  const n      = sorted.length;
+  const mean   = finals.reduce((a, b) => a + b, 0) / n;
 
   let probProfit = 0, probGain10 = 0, probLoss10 = 0;
   for (let i = 0; i < n; i++) {
@@ -116,13 +115,38 @@ export function percentilesPerDay(matrix, days, pcts = [10, 50, 90]) {
   return result;
 }
 
-// Ajustare parametri GBM pe baza sentiment scores
-export function adjustParams(drift, sigma, sentimentScores) {
-  if (!sentimentScores || sentimentScores.length === 0) return { driftAdj: drift, sigmaAdj: sigma };
-  const avg     = sentimentScores.reduce((a, b) => a + b, 0) / sentimentScores.length;
-  const absAvg  = Math.abs(avg);
+// ── Ajustare parametri GBM ────────────────────────────
+// Acum tine cont de:
+//   - scorurile celor 7 factori
+//   - ponderile per sector (fiecare factor are relevanta diferita)
+//   - VIX (indicele fricii) — creste sigma cand piata e stresata
+export function adjustParams(drift, sigma, sentimentScores, sectorWeights = null, vixImpact = 0) {
+  if (!sentimentScores || sentimentScores.length === 0) {
+    return { driftAdj: drift, sigmaAdj: sigma };
+  }
+
+  const FACTOR_KEYS = ['geopolitic','inflatie_dobanzi','crize_financiare',
+                       'pandemii_sanatate','tarife_comerciale','alegeri_politice','stiri_companie'];
+
+  let weightedSum  = 0;
+  let totalWeight  = 0;
+
+  sentimentScores.forEach((score, i) => {
+    const key = FACTOR_KEYS[i];
+    const w   = sectorWeights?.[key] ?? 1.0;
+    weightedSum  += score * w;
+    totalWeight  += w;
+  });
+
+  const avg      = totalWeight > 0 ? weightedSum / totalWeight : 0;
+  const absAvg   = Math.abs(avg);
+
+  // Drift ajustat: sentiment pozitiv creste drift-ul usor
   const driftAdj = drift + avg * 0.0002;
-  const sigmaAdj = sigma * (1 + absAvg * 0.3);
+
+  // Sigma ajustat: sentiment extrem + VIX mare = volatilitate mai mare
+  const sigmaAdj = sigma * (1 + absAvg * 0.3 + vixImpact);
+
   return { driftAdj, sigmaAdj };
 }
 

@@ -257,7 +257,7 @@ export async function fetchVIX() {
   try {
     const url   = 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d';
     const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-    const r     = await fetch(proxy);
+    const r     = await fetch(proxy, { signal: AbortSignal.timeout(4000) });
     const data  = await r.json();
     const closes = data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(Boolean);
     if (!closes || closes.length === 0) return { vix: null, vixLabel: 'N/A', vixImpact: 0 };

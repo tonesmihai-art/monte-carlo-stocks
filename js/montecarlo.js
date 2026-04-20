@@ -28,15 +28,73 @@ export function calcParams(closes) {
   const sigma    = Math.sqrt(variance);
   const drift    = mean - variance / 2;
 
-  // Media preturilor pe ultimele 50 de zile de tranzactionare
+  // Media preturilor pe ultimele 30 de zile de tranzactionare
   const last50   = closes.slice(-50);
-  const mean50   = last50.reduce((a, b) => a + b, 0) / last50.length;
+  const mean50   = last50.reduce((a, b) => a + b, 0) / last50.length; // redenumit intern dar compatibil cu restul codului
 
-  // Cat de departe e pretul curent fata de media pe 50 zile (%)
+  // Cat de departe e pretul curent fata de media pe 30 zile (%)
   const currentPrice   = closes[closes.length - 1];
   const deviationPct   = ((currentPrice - mean50) / mean50) * 100;
 
-  return { drift, sigma, mean, variance, mean50, deviationPct };
+  // Volume Trend — ultimele 10 zile vs media pe 50 de zile
+  // Compara directia pretului cu directia volumului
+  const volumeTrend = calcVolumeTrend(closes, volumes);
+
+  return { drift, sigma, mean, variance, mean50, deviationPct, volumeTrend };
+}
+
+
+// Calculeaza trendul de volum pe ultimele 10 zile
+// Returneaza un scor si un label descriptiv
+function calcVolumeTrend(closes, volumes) {
+  if (!volumes || volumes.length < 20) {
+    return { score: 0, label: 'N/A', detail: 'date insuficiente' };
+  }
+
+  const n     = Math.min(10, closes.length - 1);
+  const vols  = volumes.filter(v => v != null && v > 0);
+  if (vols.length < 20) return { score: 0, label: 'N/A', detail: 'volum indisponibil' };
+
+  const recentVols = vols.slice(-n);
+  const avgVol30   = vols.slice(-30).reduce((a, b) => a + b, 0) / Math.min(30, vols.length);
+
+  // Directia pretului in ultimele 10 zile
+  const recentCloses  = closes.slice(-n);
+  const priceUp       = recentCloses[recentCloses.length - 1] > recentCloses[0];
+  const avgRecentVol  = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
+  const volRatio      = avgRecentVol / avgVol30; // >1 = volum crescut, <1 = volum scazut
+
+  let score = 0;
+  let label = '';
+  let detail = '';
+
+  if (priceUp && volRatio > 1.1) {
+    // Pret sus + volum sus = trend bullish confirmat
+    score  = Math.min(0.3, (volRatio - 1) * 0.5);
+    label  = `📈 Trend confirmat (+${((volRatio-1)*100).toFixed(0)}% vol)`;
+    detail = 'bullish';
+  } else if (priceUp && volRatio < 0.9) {
+    // Pret sus + volum jos = trend slab, posibila inversare
+    score  = -Math.min(0.15, (1 - volRatio) * 0.3);
+    label  = `⚠️ Trend slab (vol -${((1-volRatio)*100).toFixed(0)}%)`;
+    detail = 'divergenta bearish';
+  } else if (!priceUp && volRatio > 1.1) {
+    // Pret jos + volum sus = vanzare confirmata
+    score  = -Math.min(0.3, (volRatio - 1) * 0.5);
+    label  = `📉 Vanzare confirmata (+${((volRatio-1)*100).toFixed(0)}% vol)`;
+    detail = 'bearish';
+  } else if (!priceUp && volRatio < 0.9) {
+    // Pret jos + volum jos = corectie slaba, posibila revenire
+    score  = Math.min(0.1, (1 - volRatio) * 0.2);
+    label  = `🔄 Corectie slaba (vol -${((1-volRatio)*100).toFixed(0)}%)`;
+    detail = 'divergenta bullish';
+  } else {
+    score  = 0;
+    label  = '➡️ Neutral';
+    detail = 'neutru';
+  }
+
+  return { score: +score.toFixed(3), label, detail, volRatio: +volRatio.toFixed(2) };
 }
 
 // ── Simulare GBM cu Mean Reversion optional ───────────
@@ -140,7 +198,7 @@ export function percentilesPerDay(matrix, days, pcts = [10, 50, 90]) {
 // Combina: sentiment ponderat pe sector + VIX + mean reversion
 export function adjustParams(drift, sigma, sentimentScores,
                               sectorWeights = null, vixImpact = 0,
-                              deviationPct = 0) {
+                              deviationPct = 0, volumeTrendScore = 0) {
   if (!sentimentScores || sentimentScores.length === 0) {
     return {
       driftAdj: drift, sigmaAdj: sigma,
@@ -164,8 +222,11 @@ export function adjustParams(drift, sigma, sentimentScores,
   const avg    = totalWeight > 0 ? weightedSum / totalWeight : 0;
   const absAvg = Math.abs(avg);
 
-  const driftAdj       = drift + avg * 0.0002;
-  const sigmaAdj       = sigma * (1 + absAvg * 0.3 + vixImpact);
+  // Volume trend confirma sau slabeste drift-ul
+  const driftAdj       = drift + avg * 0.0002 + volumeTrendScore * 0.0001;
+  // Volum divergent (trend slab) => creste incertitudinea
+  const volUncertainty = volumeTrendScore < 0 ? Math.abs(volumeTrendScore) * 0.15 : 0;
+  const sigmaAdj       = sigma * (1 + absAvg * 0.3 + vixImpact + volUncertainty);
   const meanRevStrength = calcMeanRevStrength(deviationPct);
 
   return { driftAdj, sigmaAdj, meanRevStrength };

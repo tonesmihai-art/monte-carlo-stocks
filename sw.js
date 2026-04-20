@@ -19,9 +19,11 @@ self.addEventListener('install', e => {
   self.skipWaiting();
 });
 
-self.addEventListener('install', (event) => {
-  self.skipWaiting(); // Forțează worker-ul nou să devină activ imediat
+// ADAUGĂ ȘI ACEST BLOC:
+self.addEventListener('activate', e => {
+  e.waitUntil(clients.claim()); 
 });
+
 
 self.addEventListener('activate', e => {
   e.waitUntil(

@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
+    /* ── Sector & VIX badges ─────────────────────────── */
     #sector-badge { display:none; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
     .sector-chip {
       background: rgba(79,195,247,0.12); color: #4fc3f7;
@@ -19,6 +20,115 @@
     .vix-chip {
       background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
       border-radius: 20px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+    }
+
+    /* ── Tooltip system ──────────────────────────────── */
+    .tip-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .tip-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: rgba(79,195,247,0.18);
+      border: 1px solid rgba(79,195,247,0.4);
+      color: #4fc3f7;
+      font-size: 9px;
+      font-weight: 700;
+      cursor: help;
+      flex-shrink: 0;
+      line-height: 1;
+      transition: background 0.2s;
+      font-style: normal;
+    }
+    .tip-icon:hover {
+      background: rgba(79,195,247,0.35);
+    }
+    .tip-bubble {
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: 230px;
+      background: #1a1a2e;
+      border: 1px solid rgba(79,195,247,0.35);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 11px;
+      line-height: 1.55;
+      color: #cdd;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+      z-index: 9999;
+      transition: opacity 0.18s ease, visibility 0.18s ease;
+      text-align: left;
+      white-space: normal;
+    }
+    .tip-bubble::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: rgba(79,195,247,0.35);
+    }
+    .tip-wrap:hover .tip-bubble,
+    .tip-wrap:focus-within .tip-bubble {
+      visibility: visible;
+      opacity: 1;
+    }
+    /* Adjust bubble position for pills near edges */
+    .tip-bubble.tip-left {
+      left: auto;
+      right: 0;
+      transform: none;
+    }
+    .tip-bubble.tip-left::after {
+      left: auto;
+      right: 10px;
+      transform: none;
+    }
+    .tip-bubble strong {
+      color: #4fc3f7;
+      display: block;
+      margin-bottom: 4px;
+      font-size: 11.5px;
+    }
+    .tip-bubble .tip-impact {
+      display: inline-block;
+      margin-top: 5px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      background: rgba(79,195,247,0.12);
+      color: #4fc3f7;
+    }
+    .tip-bubble .tip-scale {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .tip-scale-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+    }
+    .tip-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
     }
   </style>
 </head>
@@ -81,12 +191,104 @@
           <div id="stock-ticker" class="stock-ticker">—</div>
           <div id="sector-badge"></div>
         </div>
+
         <div class="info-pills">
-          <div class="pill">Sigma: <span id="info-sigma">—</span></div>
-          <div class="pill">Vol. anuala: <span id="info-vol">—</span></div>
-          <div class="pill">Drift: <span id="info-drift">—</span></div>
-          <div class="pill">MA50: <span id="info-ma50">—</span></div>
-          <div class="pill">Vol: <span id="info-voltren">—</span></div>
+
+          <!-- SIGMA -->
+          <div class="pill">
+            <span class="tip-wrap">
+              Sigma:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>📊 Sigma — Volatilitate zilnica</strong>
+                Cat de mult variaza pretul intr-o singura zi. O sigma mare = traiectorii mai raspandite = risc mai mare, dar si potential de castig mai mare.
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 1%/zi — actiune stabila</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 1–2%/zi — volatilitate medie</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 3%/zi — actiune riscanta</div>
+                </div>
+                <span class="tip-impact">Influenteaza: dispersia traiectoriilor</span>
+              </div>
+            </span>
+            <span id="info-sigma">—</span>
+          </div>
+
+          <!-- VOL. ANUALA -->
+          <div class="pill">
+            <span class="tip-wrap">
+              Vol. anuala:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>📅 Volatilitate anuala</strong>
+                Sigma zilnica inmultita cu √252 (zile de tranzactionare/an). Arata riscul total al actiunii pe un an intreg.
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 15%/an — actiune defensiva</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 15–30%/an — risc moderat</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 40%/an — actiune speculativa</div>
+                </div>
+                <span class="tip-impact">Influenteaza: latime interval de incredere</span>
+              </div>
+            </span>
+            <span id="info-vol">—</span>
+          </div>
+
+          <!-- DRIFT -->
+          <div class="pill">
+            <span class="tip-wrap">
+              Drift:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>📈 Drift — Tendinta zilnica</strong>
+                Directia medie a pretului per zi, calculata din istoricul unui an. Drift pozitiv = trend ascendent. Influenteaza direct unde se concentreaza simularile.
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &gt; 0 — tendinta de crestere</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> ≈ 0 — piata laterala</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &lt; 0 — tendinta de scadere</div>
+                </div>
+                <span class="tip-impact">Influenteaza: media preturilor simulate</span>
+              </div>
+            </span>
+            <span id="info-drift">—</span>
+          </div>
+
+          <!-- MA60 -->
+          <div class="pill">
+            <span class="tip-wrap">
+              MA60:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble tip-left">
+                <strong>〰️ Media mobila 60 zile</strong>
+                Media pretului din ultimele 60 de zile. Procentul arata cat de departe e pretul curent fata de aceasta medie (mean reversion).
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Pret &gt; MA → presiune de scadere</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Pret &lt; MA → presiune de crestere</div>
+                </div>
+                Deviatia mare fata de MA ajusteaza drift-ul in simularea AI.
+                <span class="tip-impact">Influenteaza: mean reversion in GBM</span>
+              </div>
+            </span>
+            <span id="info-ma50">—</span>
+          </div>
+
+          <!-- VOL TREND -->
+          <div class="pill">
+            <span class="tip-wrap">
+              Vol:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble tip-left">
+                <strong>🔊 Trend volum tranzactionare</strong>
+                Compara volumul din ultimele 10 zile cu media pe 30 de zile, corelat cu directia pretului.
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Bullish — volum mare + pret sus</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> Neutral — fara confirmare clara</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Bearish — volum mare + pret jos</div>
+                </div>
+                <span class="tip-impact">Influenteaza: ajustarea drift-ului AI</span>
+              </div>
+            </span>
+            <span id="info-voltren">—</span>
+          </div>
+
         </div>
         <div id="stock-price" class="stock-price">—</div>
       </div>

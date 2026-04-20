@@ -1,9 +1,10 @@
 // ─────────────────────────────────────────────────────
 //  MONTE CARLO — Geometric Brownian Motion in JavaScript
 //  pret_nou = pret_vechi * exp(drift + sigma * Z)
+//  + Mean Reversion (Ornstein-Uhlenbeck) pe 50 de zile
 // ─────────────────────────────────────────────────────
 
-const NUM_SIMS = 50_000;
+const NUM_SIMS = 30_000;
 
 // Box-Muller: generam numere aleatoare cu distributie normala
 function randNormal() {
@@ -13,7 +14,7 @@ function randNormal() {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-// Calculeaza drift si sigma din preturile istorice
+// Calculeaza drift, sigma si media pe 50 de zile din preturile istorice
 export function calcParams(closes) {
   const logReturns = [];
   for (let i = 1; i < closes.length; i++) {
@@ -21,23 +22,34 @@ export function calcParams(closes) {
       logReturns.push(Math.log(closes[i] / closes[i - 1]));
     }
   }
-  const n    = logReturns.length;
-  const mean = logReturns.reduce((a, b) => a + b, 0) / n;
+  const n        = logReturns.length;
+  const mean     = logReturns.reduce((a, b) => a + b, 0) / n;
   const variance = logReturns.reduce((s, r) => s + (r - mean) ** 2, 0) / (n - 1);
-  const sigma = Math.sqrt(variance);
-  const drift = mean - variance / 2;
-  return { drift, sigma, mean, variance };
+  const sigma    = Math.sqrt(variance);
+  const drift    = mean - variance / 2;
+
+  // Media preturilor pe ultimele 50 de zile de tranzactionare
+  const last50   = closes.slice(-50);
+  const mean50   = last50.reduce((a, b) => a + b, 0) / last50.length;
+
+  // Cat de departe e pretul curent fata de media pe 50 zile (%)
+  const currentPrice   = closes[closes.length - 1];
+  const deviationPct   = ((currentPrice - mean50) / mean50) * 100;
+
+  return { drift, sigma, mean, variance, mean50, deviationPct };
 }
 
-// Ruleaza NUM_SIMS simulari GBM pentru 'days' zile
-// Returneaza matrice [days+1][NUM_SIMS]
+// ── Simulare GBM cu Mean Reversion optional ───────────
+// meanRevStrength: 0 = dezactivat, 0.05-0.15 = realist pentru actiuni
+// mean50: tinta de revenire (media pe 50 zile)
 export function simulate(currentPrice, drift, sigma, days,
-                          driftAdj = null, sigmaAdj = null) {
-  const d  = driftAdj  ?? drift;
-  const s  = sigmaAdj  ?? sigma;
+                          driftAdj = null, sigmaAdj = null,
+                          meanRevStrength = 0, mean50 = null) {
+  const d      = driftAdj ?? drift;
+  const s      = sigmaAdj ?? sigma;
+  const target = mean50 ?? currentPrice; // daca nu avem mean50, nu revenim nicaieri
   const matrix = new Float64Array((days + 1) * NUM_SIMS);
 
-  // Ziua 0 = pretul curent
   for (let sim = 0; sim < NUM_SIMS; sim++) {
     matrix[sim] = currentPrice;
   }
@@ -46,8 +58,16 @@ export function simulate(currentPrice, drift, sigma, days,
     const offset     = day * NUM_SIMS;
     const prevOffset = (day - 1) * NUM_SIMS;
     for (let sim = 0; sim < NUM_SIMS; sim++) {
-      const z = randNormal();
-      matrix[offset + sim] = matrix[prevOffset + sim] * Math.exp(d + s * z);
+      const prevPrice = matrix[prevOffset + sim];
+      const z         = randNormal();
+
+      // Mean reversion: trage pretul spre mean50
+      // Cu cat pretul e mai departe de medie, cu atat pull-ul e mai puternic
+      const reversionPull = meanRevStrength > 0 && target > 0
+        ? meanRevStrength * Math.log(target / prevPrice)
+        : 0;
+
+      matrix[offset + sim] = prevPrice * Math.exp(d + reversionPull + s * z);
     }
   }
   return matrix;
@@ -70,10 +90,10 @@ export function percentile(arr, p) {
 
 // Calculeaza toate statisticile
 export function calcStats(matrix, days, currentPrice) {
-  const finals  = getFinalPrices(matrix, days);
-  const sorted  = Float64Array.from(finals).sort();
-  const n       = sorted.length;
-  const mean    = finals.reduce((a, b) => a + b, 0) / n;
+  const finals = getFinalPrices(matrix, days);
+  const sorted = Float64Array.from(finals).sort();
+  const n      = sorted.length;
+  const mean   = finals.reduce((a, b) => a + b, 0) / n;
 
   let probProfit = 0, probGain10 = 0, probLoss10 = 0;
   for (let i = 0; i < n; i++) {
@@ -116,10 +136,16 @@ export function percentilesPerDay(matrix, days, pcts = [10, 50, 90]) {
   return result;
 }
 
-// Ajustare parametri GBM pe baza sentiment scores + sector weights + VIX
-export function adjustParams(drift, sigma, sentimentScores, sectorWeights = null, vixImpact = 0) {
+// ── Ajustare parametri GBM ────────────────────────────
+// Combina: sentiment ponderat pe sector + VIX + mean reversion
+export function adjustParams(drift, sigma, sentimentScores,
+                              sectorWeights = null, vixImpact = 0,
+                              deviationPct = 0) {
   if (!sentimentScores || sentimentScores.length === 0) {
-    return { driftAdj: drift, sigmaAdj: sigma };
+    return {
+      driftAdj: drift, sigmaAdj: sigma,
+      meanRevStrength: calcMeanRevStrength(deviationPct),
+    };
   }
 
   const FACTOR_KEYS = ['geopolitic','inflatie_dobanzi','crize_financiare',
@@ -138,13 +164,27 @@ export function adjustParams(drift, sigma, sentimentScores, sectorWeights = null
   const avg    = totalWeight > 0 ? weightedSum / totalWeight : 0;
   const absAvg = Math.abs(avg);
 
-  // Drift: sentiment pozitiv ponderat pe sector creste drift-ul
-  const driftAdj = drift + avg * 0.0002;
+  const driftAdj       = drift + avg * 0.0002;
+  const sigmaAdj       = sigma * (1 + absAvg * 0.3 + vixImpact);
+  const meanRevStrength = calcMeanRevStrength(deviationPct);
 
-  // Sigma: sentiment extrem + VIX ridicat = volatilitate mai mare
-  const sigmaAdj = sigma * (1 + absAvg * 0.3 + vixImpact);
+  return { driftAdj, sigmaAdj, meanRevStrength };
+}
 
-  return { driftAdj, sigmaAdj };
+// Calculeaza forta de mean reversion in functie de deviatie fata de MA50
+// Logica: cu cat pretul e mai departe de medie, cu atat revine mai puternic
+// deviationPct > 0 = supracumparata, < 0 = suprainvatata
+function calcMeanRevStrength(deviationPct) {
+  const absDev = Math.abs(deviationPct);
+
+  // Sub 5% deviere => practic fara mean reversion
+  if (absDev < 5)  return 0.0;
+  // 5-15% deviere => revenire slaba
+  if (absDev < 15) return 0.03;
+  // 15-30% deviere => revenire moderata
+  if (absDev < 30) return 0.07;
+  // Peste 30% deviere => revenire puternica
+  return 0.12;
 }
 
 export { NUM_SIMS };

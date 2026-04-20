@@ -343,18 +343,42 @@ function assignFactor(title, ticker) {
   return 'stiri_companie';
 }
 
-// ── Descarcare stiri — RSS via rss2json proxy ─────────
+// ── Descarcare stiri — RSS cu doua proxy-uri fallback ─
+// Incearca rss2json.com → daca pica, fallback la corsproxy.io + DOMParser
 async function fetchRss(url, sursa, limit = 25) {
   const titluri = [];
+
+  // Incercare 1: rss2json.com (raspuns JSON gata parsit)
   try {
     const proxy = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`;
-    const r     = await fetchWithTimeout(proxy, 6000);
-    if (!r.ok) return titluri;
-    const data  = await r.json();
-    (data.items || []).slice(0, limit).forEach(item => {
-      if (item.title) titluri.push({ titlu: item.title, sursa });
-    });
-  } catch (e) { console.warn(`${sursa} timeout/fail:`, e.message); }
+    const r     = await fetchWithTimeout(proxy, 5000);
+    if (r.ok) {
+      const data = await r.json();
+      if (data.status === 'ok' && data.items?.length > 0) {
+        data.items.slice(0, limit).forEach(item => {
+          if (item.title) titluri.push({ titlu: item.title, sursa });
+        });
+        return titluri; // succes — returnam direct
+      }
+    }
+  } catch (e) { console.warn(`${sursa} rss2json fail:`, e.message); }
+
+  // Incercare 2: corsproxy.io + parsare XML cu DOMParser
+  try {
+    const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+    const r     = await fetchWithTimeout(proxy, 5000);
+    if (r.ok) {
+      const text   = await r.text();
+      const parser = new DOMParser();
+      const xml    = parser.parseFromString(text, 'text/xml');
+      Array.from(xml.querySelectorAll('item')).slice(0, limit).forEach(item => {
+        const raw = item.querySelector('title')?.textContent || '';
+        const titlu = raw.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+        if (titlu) titluri.push({ titlu, sursa });
+      });
+    }
+  } catch (e) { console.warn(`${sursa} corsproxy fail:`, e.message); }
+
   return titluri;
 }
 

@@ -15,7 +15,7 @@ function randNormal() {
 }
 
 // Calculeaza drift, sigma si media pe 50 de zile din preturile istorice
-export function calcParams(closes) {
+export function calcParams(closes, volumes = []) {
   const logReturns = [];
   for (let i = 1; i < closes.length; i++) {
     if (closes[i - 1] > 0 && closes[i] > 0) {

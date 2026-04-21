@@ -239,6 +239,7 @@ const TICKER_SECTOR_MAP = {
   'APAM.AS':{ sector: 'Basic Materials',        industry: 'Steel' },
   'ASML.AS':{ sector: 'Technology',             industry: 'Semiconductor Equipment & Materials' },
   'VPK.AS': { sector: 'Energy',                 industry: 'Oil & Gas Integrated' },
+  'ECMPA.AS': { sector: 'Real Estate',            industry: 'REIT — Specialty' },
   // Romania (.RO)
   'TLV.RO': { sector: 'Financial Services',     industry: 'Banks — Regional' },
   'SNP.RO': { sector: 'Energy',                 industry: 'Oil & Gas Integrated' },

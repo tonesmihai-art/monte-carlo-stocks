@@ -150,7 +150,7 @@
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V24.2</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V18.4</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -225,6 +225,28 @@
               </div>
             </span>
             <span id="info-sigma">—</span>
+          </div>
+
+          <!-- IV — VOLATILITATE IMPLICITA DIN OPTIUNI -->
+          <div class="pill" id="pill-iv">
+            <span class="tip-wrap">
+              IV opt:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>📉 Volatilitate Implicita (Optiuni)</strong>
+                Ce plateste piata <em>acum</em> pentru risc pe urmatoarele ~30 de zile — forward-looking, nu bazata pe trecut. Extrase din contractul ATM (la bani) cel mai apropiat de 30 zile.
+                <div class="tip-scale" style="margin-top:5px">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> IV &lt; sigma istorica — piata calma, risc perceput redus</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> IV ≈ sigma istorica — risc normal</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> IV &gt; sigma istorica — piata priceaza un eveniment (earnings, macro)</div>
+                </div>
+                <div style="margin-top:6px;font-size:10.5px">
+                  IV are greutate <b>70%</b> pentru simularea pe 30 zile si scade progresiv la <b>10%</b> pentru 360 de zile, unde volatilitatea istorica devine mai relevanta.
+                </div>
+                <span class="tip-impact">Influenteaza: sigma in simulare, mai ales pe termen scurt</span>
+              </div>
+            </span>
+            <span id="info-iv">—</span>
           </div>
 
           <!-- GARCH ACTUAL -->

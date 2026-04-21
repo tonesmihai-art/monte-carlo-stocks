@@ -227,6 +227,55 @@ function chartsHTML(e, forExport = false) {
   </div>`;
 }
 
+// ── Lightbox grafice watchlist ────────────────────────
+function ensureLightbox() {
+  let lb = $('wl-lightbox');
+  if (lb) return lb;
+  lb = document.createElement('div');
+  lb.id = 'wl-lightbox';
+  lb.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.90);z-index:10000;overflow-y:auto;padding:48px 16px 32px;';
+  lb.innerHTML = `
+    <div style="max-width:840px;margin:auto;position:relative;">
+      <button id="wl-lb-close" style="position:fixed;top:14px;right:18px;background:rgba(255,255,255,0.1);
+              border:1px solid rgba(255,255,255,0.2);color:#e0e0e0;border-radius:20px;
+              padding:6px 16px;cursor:pointer;font-size:13px;font-weight:600;">✕ Închide</button>
+      <div id="wl-lb-content"></div>
+    </div>`;
+  lb.addEventListener('click', e => { if (e.target === lb) lb.style.display = 'none'; });
+  lb.querySelector('#wl-lb-close').addEventListener('click', () => { lb.style.display = 'none'; });
+  document.body.appendChild(lb);
+  return lb;
+}
+
+window.openWatchlistCharts = function(idx) {
+  const list = loadWatchlist();
+  const e    = list[idx];
+  if (!e) return;
+  const lb      = ensureLightbox();
+  const content = $('wl-lb-content');
+  const periods  = [30, 90, 180, 360].filter(d => e.charts?.[d]);
+
+  content.innerHTML = `
+    <div style="margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08);">
+      <span style="font-size:22px;font-weight:700;color:#e0e0e0;">${e.ticker}</span>
+      <span style="font-size:13px;color:rgba(255,255,255,0.40);margin-left:10px;">${e.name}</span><br>
+      <span style="font-size:20px;font-weight:700;color:#4fc3f7;">${e.currency} ${e.price}</span>
+      <span style="font-size:13px;color:rgba(255,255,255,0.40);margin-left:14px;">${e.date}${e.time ? ' · ' + e.time : ''}</span>
+    </div>
+    ${periods.length ? periods.map(days => `
+      <div style="margin-bottom:22px;">
+        <div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.35);
+                    letter-spacing:0.6px;text-transform:uppercase;margin-bottom:8px;">${days} ZILE</div>
+        <div style="display:flex;gap:10px;align-items:flex-start;">
+          <img src="${e.charts[days].traj}" style="width:58%;border-radius:8px;display:block;" alt="Traj ${days}z">
+          <img src="${e.charts[days].hist}" style="width:39%;border-radius:8px;display:block;" alt="Hist ${days}z">
+        </div>
+      </div>`).join('') : '<div style="color:rgba(255,255,255,0.3);font-size:13px;">Nu există grafice salvate.</div>'}`;
+
+  lb.style.display = 'block';
+  lb.scrollTop = 0;
+};
+
 function renderWatchlist() {
   const list    = loadWatchlist();
   const cards   = $('watchlist-cards');
@@ -243,7 +292,11 @@ function renderWatchlist() {
   empty.style.display = 'none';
   if (countEl) { countEl.textContent = list.length; countEl.style.display = 'inline'; }
 
-  cards.innerHTML = list.map((e, idx) => `
+  const btnBase = 'padding:4px 11px;border-radius:12px;font-size:10.5px;cursor:pointer;font-weight:600;';
+
+  cards.innerHTML = list.map((e, idx) => {
+    const hasCharts = e.charts && Object.keys(e.charts).some(k => e.charts[k]);
+    return `
     <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
          border-radius:10px;padding:14px 16px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
@@ -252,11 +305,12 @@ function renderWatchlist() {
           <span style="font-size:12px;color:rgba(255,255,255,0.45);margin-left:8px;">${e.name}</span>
           <span style="font-size:13px;color:#4fc3f7;margin-left:8px;font-weight:600;">${e.currency} ${e.price}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <span style="font-size:10px;color:rgba(255,255,255,0.30);">${e.date}${e.time ? ' ' + e.time : ''}</span>
-          <button onclick="removeWatchlistEntry(${idx})" style="padding:2px 8px;border-radius:10px;
-               border:1px solid rgba(239,83,80,0.3);background:transparent;color:#ef5350;
-               font-size:10px;cursor:pointer;">✕</button>
+          ${hasCharts ? `<button onclick="openWatchlistCharts(${idx})"
+               style="${btnBase}border:1px solid rgba(79,195,247,0.35);background:rgba(79,195,247,0.08);color:#4fc3f7;">📊 Grafice</button>` : ''}
+          <button onclick="removeWatchlistEntry(${idx})"
+               style="${btnBase}border:1px solid rgba(239,83,80,0.3);background:transparent;color:#ef5350;">✕</button>
         </div>
       </div>
       <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px;">
@@ -265,9 +319,8 @@ function renderWatchlist() {
              color:rgba(255,255,255,0.65);">${p}</span>`).join('')}
       </div>
       ${e.comment ? `<div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.45);line-height:1.55;">${e.comment}</div>` : ''}
-      ${chartsHTML(e)}
     </div>
-  `).join('');
+  `; }).join('');
 }
 
 window.removeWatchlistEntry = function(idx) {
@@ -341,10 +394,14 @@ function exportWatchlistHTML() {
       ` : ''}
     </div>`;
 
+    // JSON embedded pentru import (fara spatii in plus)
+    const entryJson = JSON.stringify(e).replace(/<\/script>/gi, '<\\/script>');
+
     const html = `<!DOCTYPE html>
 <html lang="ro"><head><meta charset="UTF-8">
 <title>${e.ticker} — urmărit · MC.Stocks</title>
 <style>${CSS}</style></head><body>
+<script id="mc-data" type="application/json">${entryJson}<\/script>
 <h1>📌 ${e.ticker}</h1>
 <div class="meta">${e.name} · Salvat ${e.date}${e.time ? ' ' + e.time : ''} · MC.Stocks</div>
 ${card}
@@ -359,6 +416,43 @@ ${card}
       a.click();
       URL.revokeObjectURL(a.href);
     }, i * 300);
+  });
+}
+
+// ── Import watchlist din fisiere HTML exportate ────────
+function importWatchlistFiles(files) {
+  if (!files || !files.length) return;
+  let done = 0;
+  let imported = 0;
+
+  Array.from(files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const html  = ev.target.result;
+        const match = html.match(/<script id="mc-data" type="application\/json">([\s\S]*?)<\/script>/);
+        if (!match) {
+          console.warn('Fisierul nu contine date MC.Stocks:', file.name);
+        } else {
+          const entry = JSON.parse(match[1]);
+          if (entry.ticker) {
+            saveToWatchlist(entry);
+            imported++;
+          }
+        }
+      } catch (err) {
+        console.error('Import error:', file.name, err);
+      }
+      done++;
+      if (done === files.length) {
+        renderWatchlist();
+        if (imported > 0) {
+          // Navigheaza la sectiunea watchlist
+          showSection('watchlist-section');
+        }
+      }
+    };
+    reader.readAsText(file);
   });
 }
 
@@ -1217,6 +1311,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') runSimulation();
   });
   $('export-watchlist-btn')?.addEventListener('click', exportWatchlistHTML);
+  $('import-watchlist-btn')?.addEventListener('click', () => {
+    $('import-watchlist-input')?.click();
+  });
+  $('import-watchlist-input')?.addEventListener('change', e => {
+    importWatchlistFiles(e.target.files);
+    e.target.value = ''; // reset ca sa poata reimporta acelasi fisier
+  });
   $('clear-watchlist-btn')?.addEventListener('click', () => {
     if (confirm('Ștergi toată lista de urmărit?')) {
       localStorage.removeItem(WATCHLIST_KEY);

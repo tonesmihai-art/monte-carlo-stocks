@@ -420,6 +420,79 @@ ${card}
 }
 
 // ── Import watchlist din fisiere HTML exportate ────────
+// Suporta ambele formate: JSON embedded (nou) si HTML vizual (vechi)
+
+function parseWatchlistFromHTML(html, filename) {
+  // ── Format nou: JSON embedded ──────────────────────
+  const jsonMatch = html.match(/<script[^>]+id="mc-data"[^>]*>([\s\S]*?)<\/script>/i);
+  if (jsonMatch) {
+    try {
+      const entry = JSON.parse(jsonMatch[1].trim());
+      if (entry && entry.ticker) return entry;
+    } catch (_) {}
+  }
+
+  // ── Format vechi: parsare HTML vizuala ────────────
+  const getText = pat => { const m = html.match(pat); return m ? m[1].trim() : null; };
+
+  // Ticker din <h1> sau din numele fisierului
+  const ticker =
+    getText(/<h1[^>]*>.*?📌\s*([A-Z0-9.\-]+)/i) ||
+    getText(/<span class="ticker">([^<]+)<\/span>/i) ||
+    filename.replace(/-urmarit\.html$/i, '').replace(/\.html$/i, '').toUpperCase();
+  if (!ticker) return null;
+
+  const name     = getText(/<span class="name">([^<]+)<\/span>/i) || ticker;
+
+  // Pret si moneda
+  const priceRaw = getText(/<span class="price">([^<]+)<\/span>/i) || '';
+  const priceParts = priceRaw.trim().split(/\s+/);
+  const currency = priceParts.length >= 2 ? priceParts[0] : 'USD';
+  const price    = priceParts.length >= 2 ? priceParts.slice(1).join(' ') : priceRaw;
+
+  // Data si ora — format nou (span.date + span.time) sau vechi (impreuna)
+  const dateRaw  = getText(/<span class="date">([^<]+)<\/span>/i) || '';
+  const timeRaw  = getText(/<span class="time">([^<]+)<\/span>/i) ||
+                   getText(/<span[^>]*class="time"[^>]*>([^<]+)<\/span>/i) || '';
+  // Daca data contine ora separata prin ·
+  const dateSplit = dateRaw.split('·').map(s => s.trim());
+  const date = dateSplit[0] || '';
+  const time = timeRaw || dateSplit[1] || '';
+
+  // Pills
+  const pills = [];
+  const pillRe = /<span class="pill">([^<]+)<\/span>/gi;
+  let pm;
+  while ((pm = pillRe.exec(html)) !== null) pills.push(pm[1].trim());
+
+  // Comment (text simplu, fara taguri)
+  const commentMatch = html.match(/<div class="comment">([\s\S]*?)<\/div>/i);
+  const comment = commentMatch
+    ? commentMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    : '';
+
+  // Charts — img cu alt="Traj Xz" / "Hist Xz"
+  const charts = {};
+  const imgRe  = /<img[^>]+src="(data:image\/[^"]+)"[^>]+alt="(Traj|Hist) (\d+)z"/gi;
+  let im;
+  while ((im = imgRe.exec(html)) !== null) {
+    const [, src, type, dStr] = im;
+    const d = parseInt(dStr);
+    if (!charts[d]) charts[d] = {};
+    charts[d][type.toLowerCase()] = src;
+  }
+  // Incearca si ordinea inversa a atributelor (alt inainte de src)
+  const imgRe2 = /<img[^>]+alt="(Traj|Hist) (\d+)z"[^>]+src="(data:image\/[^"]+)"/gi;
+  while ((im = imgRe2.exec(html)) !== null) {
+    const [, type, dStr, src] = im;
+    const d = parseInt(dStr);
+    if (!charts[d]) charts[d] = {};
+    if (!charts[d][type.toLowerCase()]) charts[d][type.toLowerCase()] = src;
+  }
+
+  return { ticker, name, price, currency, date, time, pills, comment, charts };
+}
+
 function importWatchlistFiles(files) {
   if (!files || !files.length) return;
   let done = 0;
@@ -429,16 +502,12 @@ function importWatchlistFiles(files) {
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const html  = ev.target.result;
-        const match = html.match(/<script id="mc-data" type="application\/json">([\s\S]*?)<\/script>/);
-        if (!match) {
-          console.warn('Fisierul nu contine date MC.Stocks:', file.name);
+        const entry = parseWatchlistFromHTML(ev.target.result, file.name);
+        if (entry && entry.ticker) {
+          saveToWatchlist(entry);
+          imported++;
         } else {
-          const entry = JSON.parse(match[1]);
-          if (entry.ticker) {
-            saveToWatchlist(entry);
-            imported++;
-          }
+          console.warn('Nu s-au putut extrage date din:', file.name);
         }
       } catch (err) {
         console.error('Import error:', file.name, err);
@@ -446,10 +515,7 @@ function importWatchlistFiles(files) {
       done++;
       if (done === files.length) {
         renderWatchlist();
-        if (imported > 0) {
-          // Navigheaza la sectiunea watchlist
-          showSection('watchlist-section');
-        }
+        if (imported > 0) showSection('watchlist-section');
       }
     };
     reader.readAsText(file);

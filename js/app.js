@@ -83,71 +83,80 @@ async function captureChartsForWatchlist(periodResults, currentPrice, ticker) {
   const PERIODS_LIST = [30, 90, 180, 360];
   const captures     = {};
 
-  // Dezactiveaza animatia Chart.js temporar
   const prevAnim = Chart.defaults.animation;
   Chart.defaults.animation = false;
 
-  // Container vizibil dar invizibil — Chart.js nu randeaza in off-screen
+  // opacity:0.01 — browserul randeaza, dar nu se vede
+  // z-index:99999 — deasupra tuturor elementelor
   const tmpDiv = document.createElement('div');
-  tmpDiv.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;z-index:-9999;display:flex;flex-wrap:wrap;width:760px;';
+  tmpDiv.style.cssText = [
+    'position:fixed', 'top:0', 'left:0',
+    'width:660px', 'height:200px',
+    'opacity:0.01', 'pointer-events:none',
+    'z-index:99999', 'overflow:hidden',
+  ].join(';');
   document.body.appendChild(tmpDiv);
 
-  // Compoziteaza canvas-ul chart pe un fundal colorat si returneaza dataURL
-  function canvasToJpeg(canvas, bg = '#0f0f1e') {
-    const out = document.createElement('canvas');
-    out.width  = canvas.width;
-    out.height = canvas.height;
-    const ctx  = out.getContext('2d');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, out.width, out.height);
-    ctx.drawImage(canvas, 0, 0);
-    return out.toDataURL('image/jpeg', 0.88);
+  // Compoziteaza chart pe fundal dark si returneaza JPEG
+  function toJpeg(canvas) {
+    try {
+      const bg  = document.createElement('canvas');
+      bg.width  = canvas.width;
+      bg.height = canvas.height;
+      const ctx = bg.getContext('2d');
+      ctx.fillStyle = '#0d0d1a';
+      ctx.fillRect(0, 0, bg.width, bg.height);
+      ctx.drawImage(canvas, 0, 0);
+      return bg.toDataURL('image/jpeg', 0.85);
+    } catch (e) { console.warn('toJpeg fail:', e); return null; }
   }
 
   try {
     for (const days of PERIODS_LIST) {
       const pd = periodResults[days];
-      if (!pd) continue;
+      if (!pd) { console.warn(`No periodResult for ${days}d`); continue; }
 
-      const trajId = `_wl_traj_${days}`;
-      const histId = `_wl_hist_${days}`;
+      // IDs unici cu timestamp ca sa nu existe conflicte
+      const ts     = Date.now();
+      const trajId = `_wl_traj_${days}_${ts}`;
+      const histId = `_wl_hist_${days}_${ts}`;
 
-      // Canvas mic: 360x190 traiectorii, 280x190 histograma
-      const trajCanvas = document.createElement('canvas');
-      trajCanvas.id = trajId;
-      trajCanvas.width  = 360; trajCanvas.height = 190;
-      trajCanvas.style.cssText = 'width:360px;height:190px;display:block;';
+      tmpDiv.innerHTML = ''; // Curata iteratia anterioara
 
-      const histCanvas = document.createElement('canvas');
-      histCanvas.id = histId;
-      histCanvas.width  = 280; histCanvas.height = 190;
-      histCanvas.style.cssText = 'width:280px;height:190px;display:block;';
+      const trajC = document.createElement('canvas');
+      trajC.id = trajId; trajC.width = 370; trajC.height = 188;
+      const histC = document.createElement('canvas');
+      histC.id = histId; histC.width = 270; histC.height = 188;
 
-      tmpDiv.appendChild(trajCanvas);
-      tmpDiv.appendChild(histCanvas);
+      tmpDiv.appendChild(trajC);
+      tmpDiv.appendChild(histC);
 
-      // Randeaza graficele
-      drawTrajectories(trajId, pd.percs, pd.percsAdj, days, currentPrice, ticker);
-      drawHistogram(histId, pd.stats, pd.statsAdj, currentPrice, days);
+      // Randeaza
+      try {
+        drawTrajectories(trajId, pd.percs, pd.percsAdj, days, currentPrice, ticker);
+        drawHistogram(histId, pd.stats, pd.statsAdj, currentPrice, days);
+      } catch (drawErr) {
+        console.error(`Draw error ${days}d:`, drawErr);
+        continue;
+      }
 
-      // Asteapta randarea completa
-      await new Promise(r => setTimeout(r, 200));
+      // Asteapta randarea Chart.js
+      await new Promise(r => setTimeout(r, 280));
 
-      // Captura cu fundal adaugat
-      captures[days] = {
-        traj: canvasToJpeg(trajCanvas),
-        hist: canvasToJpeg(histCanvas),
-      };
+      const tj = toJpeg(trajC);
+      const hj = toJpeg(histC);
+      if (tj || hj) captures[days] = { traj: tj, hist: hj };
 
-      // Curata
-      Chart.getChart(trajCanvas)?.destroy();
-      Chart.getChart(histCanvas)?.destroy();
-      tmpDiv.removeChild(trajCanvas);
-      tmpDiv.removeChild(histCanvas);
+      // Distruge instantele Chart.js
+      try { Chart.getChart(trajC)?.destroy(); } catch (_) {}
+      try { Chart.getChart(histC)?.destroy(); } catch (_) {}
     }
+  } catch (err) {
+    console.error('captureCharts error:', err);
+    throw err;
   } finally {
     Chart.defaults.animation = prevAnim;
-    document.body.removeChild(tmpDiv);
+    try { document.body.removeChild(tmpDiv); } catch (_) {}
   }
 
   return captures;
@@ -1109,8 +1118,8 @@ async function runSimulation() {
           setTimeout(() => { saveBtn.textContent = '📌 Adaugă la urmărit'; }, 2500);
         } catch (err) {
           console.error('Watchlist save error:', err);
-          saveBtn.textContent = '⚠ Eroare la salvare';
-          setTimeout(() => { saveBtn.textContent = '📌 Adaugă la urmărit'; }, 2500);
+          saveBtn.textContent = `⚠ ${err.message || 'Eroare'}`;
+          setTimeout(() => { saveBtn.textContent = '📌 Adaugă la urmărit'; }, 3500);
         } finally {
           saveBtn.disabled = false;
         }

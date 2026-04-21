@@ -109,7 +109,7 @@ function setPillColor(pillId, color) {
 // ── Volatilitate implicita din optiuni + Put/Call Skew ─
 // Sursa primara: Nasdaq API (CORS liber, fara proxy, US stocks)
 // Fallback:      Yahoo Finance v7 prin corsproxy / allorigins
-async function fetchImpliedVolatility(ticker, currentPrice) {
+async function fetchImpliedVolatility(ticker, currentPrice, onProgress) {
 
   // Detecteaza daca e ticker US (fara sufix .XX sau -USD)
   const isUS = !ticker.includes('.') && !ticker.includes('-');
@@ -130,6 +130,7 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
   if (isUS) {
     try {
       const NBASE = 'https://api.nasdaq.com/api/quote';
+      onProgress?.(`IV: incerc Nasdaq pentru ${ticker}...`);
 
       // Pasul 1: lista expirari disponibile
       const listUrls = [
@@ -158,6 +159,7 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
           );
           const daysToExp = Math.round((new Date(nearestExp) - now) / 86400000);
 
+          onProgress?.(`IV: Nasdaq — expirare ${nearestExp} (${daysToExp}z), descarc lantul...`);
           // Pasul 2: lantul de optiuni pentru expirarea aleasa
           const chainUrls = [
             `${NBASE}/${ticker}/option-chain?assetclass=stocks&expirydate=${nearestExp}&type=all&money=all&limit=100`,
@@ -212,6 +214,7 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
                     };
                   }
                 }
+                onProgress?.(`IV: Nasdaq ✓ — IV ${(ivAnnual*100).toFixed(1)}%/an, skew ${skewData ? (skewData.skew*100).toFixed(1)+'%' : 'N/A'}`);
                 return { ivAnnual, ivDaily, atmStrike, daysToExp, skewData };
               }
             }
@@ -219,6 +222,7 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
         }
       }
     } catch (e) { console.warn('Nasdaq IV fail:', e.message); }
+    onProgress?.(`IV: Nasdaq indisponibil, incerc Yahoo Finance...`);
   }
 
   // ── Yahoo Finance v7 fallback (cu multiple proxies) ──
@@ -240,8 +244,9 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
   }
 
   try {
+    onProgress?.(`IV: incerc Yahoo Finance v7 (4 proxy-uri)...`);
     const data = await tryYahoo(`/v7/finance/options/${ticker}`);
-    if (!data) return null;
+    if (!data) { onProgress?.(`IV: Yahoo indisponibil — voi estima din VIX`); return null; }
     const result = data.optionChain.result[0];
     const now    = Date.now() / 1000;
     const t30    = now + 30 * 86400;
@@ -285,9 +290,11 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
         };
       }
     }
+    onProgress?.(`IV: Yahoo ✓ — IV ${(ivAnnual*100).toFixed(1)}%/an, skew ${skewData ? (skewData.skew*100).toFixed(1)+'%' : 'N/A'}`);
     return { ivAnnual, ivDaily, atmStrike, daysToExp, skewData };
   } catch (e) {
     console.warn('Yahoo IV fetch error:', e);
+    onProgress?.(`IV: Yahoo eroare — voi estima din VIX`);
     return null;
   }
 }
@@ -538,12 +545,13 @@ async function runSimulation() {
     // ── 2b. Volatilitate implicita din optiuni (IV) + Skew ──
     setStatus('Caut volatilitate implicita si skew din optiuni...');
     let ivData = null;
-    try { ivData = await fetchImpliedVolatility(ticker, currentPrice); } catch (e) { /* silent */ }
+    try { ivData = await fetchImpliedVolatility(ticker, currentPrice, msg => setStatus(msg)); } catch (e) { /* silent */ }
 
     // ── Fallback: IV estimat din VIX + sigma istorica ──
     // Folosit cand API-urile de optiuni nu raspund (EU/RO stocks, CORS, etc.)
     let ivEstimated = false;
     if (!ivData) {
+      setStatus('IV: calculez estimat din VIX + caracteristici actiune...');
       try {
         const vixFallback = await Promise.race([
           fetchVIX(),

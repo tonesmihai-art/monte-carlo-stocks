@@ -1275,8 +1275,9 @@ async function _secCIK(ticker) {
 function _secLatest(json, unit = 'USD') {
   const arr = json?.units?.[unit];
   if (!arr) return null;
+  // 10-K = US domestic annual | 20-F = foreign private issuer annual (IFRS)
   return arr
-    .filter(d => d.val != null && /^10-K/.test(d.form))
+    .filter(d => d.val != null && /^(10-K|20-F)/.test(d.form))
     .sort((a, b) => new Date(b.end) - new Date(a.end))[0]?.val ?? null;
 }
 
@@ -1284,24 +1285,34 @@ async function _fetchSEC(ticker) {
   const cik = await _secCIK(ticker);
   if (!cik) throw new Error(`${ticker} nu e in SEC`);
 
-  // data.sec.gov are CORS nativ → fetch direct (+ proxy fallback)
-  const B = `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap`;
-  const [rA, rC, rD, rOCF, rCapex, rSh] = await Promise.allSettled([
-    _robustGet(`${B}/Assets.json`),
-    _robustGet(`${B}/CashAndCashEquivalentsAtCarryingValue.json`),
-    _robustGet(`${B}/LongTermDebt.json`),
-    _robustGet(`${B}/NetCashProvidedByUsedInOperatingActivities.json`),
-    _robustGet(`${B}/PaymentsToAcquirePropertyPlantAndEquipment.json`),
-    _robustGet(`${B}/CommonStockSharesOutstanding.json`),
-  ]);
+  // Incearca us-gaap, then alt-name in us-gaap, then ifrs-full
+  // (ENB, EQNR = IFRS + 20-F; MO, PM, MSFT = US GAAP + 10-K)
+  async function getConcept(name, altName, unit = 'USD') {
+    const urls = [
+      `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${name}.json`,
+      altName && `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${altName}.json`,
+      `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/ifrs-full/${name}.json`,
+    ].filter(Boolean);
 
-  const v   = (r, u = 'USD') => r.status === 'fulfilled' ? _secLatest(r.value, u) : null;
-  const assets = v(rA);
-  const cash   = v(rC);
-  const debt   = v(rD);
-  const opCF   = v(rOCF);
-  const capex  = v(rCapex);
-  const sharesN = v(rSh, 'shares');
+    for (const url of urls) {
+      try {
+        const json = await _robustGet(url, 8000);
+        const val  = _secLatest(json, unit);
+        if (val != null) return val;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  const [assets, cash, debt, opCF, capex, sharesN] = await Promise.all([
+    getConcept('Assets', null),
+    getConcept('CashAndCashEquivalentsAtCarryingValue', 'CashAndCashEquivalents'),
+    getConcept('LongTermDebt', 'LongTermDebtNoncurrent'),
+    getConcept('NetCashProvidedByUsedInOperatingActivities', 'CashFlowsFromUsedInOperatingActivities'),
+    getConcept('PaymentsToAcquirePropertyPlantAndEquipment',
+               'PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'),
+    getConcept('CommonStockSharesOutstanding', null, 'shares'),
+  ]);
 
   const fcf = opCF != null ? opCF - (capex ?? 0) : null;
   return {

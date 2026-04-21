@@ -1,4 +1,4 @@
-CACHE_NAME = 'mc-stocks-v22'
+CACHE_NAME = 'mc-stocks-v23'
 const ASSETS = [
   '/',
   '/index.html',

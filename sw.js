@@ -1,4 +1,4 @@
-CACHE_NAME = 'mc-stocks-v26'
+const CACHE_NAME = 'mc-stocks-v26';
 const ASSETS = [
   '/',
   '/index.html',
@@ -10,28 +10,19 @@ const ASSETS = [
   'https://cdn.jsdelivr.net/npm/chart.js',
 ];
 
-
-
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS.filter(a => !a.startsWith('http'))))
+    caches.open(CACHE_NAME).then(c => c.addAll(ASSETS.filter(a => !a.startsWith('http'))))
   );
   self.skipWaiting();
 });
 
-// ADAUGĂ ȘI ACEST BLOC:
-self.addEventListener('activate', e => {
-  e.waitUntil(clients.claim()); 
-});
-
-
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    )
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', e => {

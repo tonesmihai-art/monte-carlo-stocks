@@ -73,10 +73,88 @@ function loadWatchlist() {
 
 function saveToWatchlist(entry) {
   let list = loadWatchlist();
-  // Inlocuieste daca exista deja acelasi ticker
   list = list.filter(e => e.ticker !== entry.ticker);
   list.unshift(entry);
   localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list));
+}
+
+// ── Captureaza graficele pentru toate perioadele ──────
+async function captureChartsForWatchlist(periodResults, currentPrice, ticker) {
+  const PERIODS_LIST = [30, 90, 180, 360];
+  const captures     = {};
+
+  // Dezactiveaza animatia Chart.js temporar
+  const prevAnim = Chart.defaults.animation;
+  Chart.defaults.animation = false;
+
+  const tmpDiv = document.createElement('div');
+  tmpDiv.style.cssText = 'position:fixed;top:-9999px;left:-9999px;pointer-events:none;width:1px;height:1px;overflow:visible;';
+  document.body.appendChild(tmpDiv);
+
+  try {
+    for (const days of PERIODS_LIST) {
+      const pd = periodResults[days];
+      if (!pd) continue;
+
+      const trajId = `_wl_traj_${days}`;
+      const histId = `_wl_hist_${days}`;
+
+      const trajCanvas = document.createElement('canvas');
+      trajCanvas.id = trajId; trajCanvas.width = 520; trajCanvas.height = 220;
+      const histCanvas = document.createElement('canvas');
+      histCanvas.id = histId; histCanvas.width = 380; histCanvas.height = 220;
+
+      tmpDiv.appendChild(trajCanvas);
+      tmpDiv.appendChild(histCanvas);
+
+      drawTrajectories(trajId, pd.percs, pd.percsAdj, days, currentPrice, ticker);
+      drawHistogram(histId, pd.stats, pd.statsAdj, currentPrice, days);
+
+      // Asteapta un tick pentru Chart.js sa randeze
+      await new Promise(r => setTimeout(r, 80));
+
+      // Captura ca JPEG (mai mic decat PNG)
+      captures[days] = {
+        traj: trajCanvas.toDataURL('image/jpeg', 0.82),
+        hist: histCanvas.toDataURL('image/jpeg', 0.82),
+      };
+
+      // Distruge instantele Chart.js si elementele
+      Chart.getChart(trajCanvas)?.destroy();
+      Chart.getChart(histCanvas)?.destroy();
+      tmpDiv.removeChild(trajCanvas);
+      tmpDiv.removeChild(histCanvas);
+    }
+  } finally {
+    Chart.defaults.animation = prevAnim;
+    document.body.removeChild(tmpDiv);
+  }
+
+  return captures;
+}
+
+// ── Genereaza HTML pentru graficele unui entry ────────
+function chartsHTML(e, forExport = false) {
+  if (!e.charts) return '';
+  const PERIODS_LIST = [30, 90, 180, 360];
+  const imgStyle = forExport
+    ? 'width:48%;border-radius:6px;'
+    : 'width:48%;border-radius:6px;cursor:zoom-in;';
+
+  return `<div style="margin-top:12px;">
+    <div style="font-size:10px;color:rgba(255,255,255,0.30);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">
+      Traiectorii simulate · Cotatie la salvare: ${e.currency} ${e.price} · ${e.date} ${e.time || ''}
+    </div>
+    ${PERIODS_LIST.filter(d => e.charts[d]).map(days => `
+      <div style="margin-bottom:10px;">
+        <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:4px;font-weight:600;">${days} ZILE</div>
+        <div style="display:flex;gap:2%;align-items:flex-start;">
+          <img src="${e.charts[days].traj}" style="${imgStyle}" alt="Traj ${days}z">
+          <img src="${e.charts[days].hist}" style="${imgStyle}" alt="Hist ${days}z">
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
 }
 
 function renderWatchlist() {
@@ -87,8 +165,8 @@ function renderWatchlist() {
   if (!cards) return;
 
   if (list.length === 0) {
-    empty.style.display  = 'block';
-    cards.innerHTML      = '';
+    empty.style.display = 'block';
+    cards.innerHTML     = '';
     if (countEl) countEl.style.display = 'none';
     return;
   }
@@ -96,27 +174,28 @@ function renderWatchlist() {
   if (countEl) { countEl.textContent = list.length; countEl.style.display = 'inline'; }
 
   cards.innerHTML = list.map((e, idx) => `
-    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08);
-         border-radius:10px; padding:14px 16px; position:relative;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+    <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
+         border-radius:10px;padding:14px 16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
         <div>
-          <span style="font-size:16px; font-weight:700; color:#e0e0e0;">${e.ticker}</span>
-          <span style="font-size:12px; color:rgba(255,255,255,0.45); margin-left:8px;">${e.name}</span>
-          <span style="font-size:12px; color:#4fc3f7; margin-left:8px; font-weight:600;">${e.currency} ${e.price}</span>
+          <span style="font-size:16px;font-weight:700;color:#e0e0e0;">${e.ticker}</span>
+          <span style="font-size:12px;color:rgba(255,255,255,0.45);margin-left:8px;">${e.name}</span>
+          <span style="font-size:13px;color:#4fc3f7;margin-left:8px;font-weight:600;">${e.currency} ${e.price}</span>
         </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:10px; color:rgba(255,255,255,0.30);">${e.date}</span>
-          <button onclick="removeWatchlistEntry(${idx})" style="padding:2px 8px; border-radius:10px;
-               border:1px solid rgba(239,83,80,0.3); background:transparent; color:#ef5350;
-               font-size:10px; cursor:pointer;">✕</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:10px;color:rgba(255,255,255,0.30);">${e.date}${e.time ? ' ' + e.time : ''}</span>
+          <button onclick="removeWatchlistEntry(${idx})" style="padding:2px 8px;border-radius:10px;
+               border:1px solid rgba(239,83,80,0.3);background:transparent;color:#ef5350;
+               font-size:10px;cursor:pointer;">✕</button>
         </div>
       </div>
-      <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:5px;">
-        ${e.pills.map(p => `<span style="font-size:10.5px; padding:2px 8px; border-radius:12px;
-             border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.04);
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px;">
+        ${e.pills.map(p => `<span style="font-size:10.5px;padding:2px 8px;border-radius:12px;
+             border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);
              color:rgba(255,255,255,0.65);">${p}</span>`).join('')}
       </div>
-      ${e.comment ? `<div style="margin-top:8px; font-size:11px; color:rgba(255,255,255,0.45); line-height:1.55;">${e.comment}</div>` : ''}
+      ${e.comment ? `<div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.45);line-height:1.55;">${e.comment}</div>` : ''}
+      ${chartsHTML(e)}
     </div>
   `).join('');
 }
@@ -135,13 +214,28 @@ function exportWatchlistHTML() {
   const rows = list.map(e => `
     <div class="card">
       <div class="card-header">
-        <span class="ticker">${e.ticker}</span>
-        <span class="name">${e.name}</span>
-        <span class="price">${e.currency} ${e.price}</span>
-        <span class="date">${e.date}</span>
+        <div>
+          <span class="ticker">${e.ticker}</span>
+          <span class="name">${e.name}</span>
+          <span class="price">${e.currency} ${e.price}</span>
+        </div>
+        <span class="date">${e.date}${e.time ? ' · ' + e.time : ''}</span>
       </div>
       <div class="pills">${e.pills.map(p => `<span class="pill">${p}</span>`).join('')}</div>
-      ${e.comment ? `<div class="comment">${e.comment.replace(/<[^>]+>/g, ' ').trim()}</div>` : ''}
+      ${e.comment ? `<div class="comment">${e.comment.replace(/<[^>]+>/g, ' ').replace(/\s+/g,' ').trim()}</div>` : ''}
+      ${e.charts ? `
+        <div class="charts-grid">
+          ${[30,90,180,360].filter(d => e.charts[d]).map(days => `
+            <div class="chart-period">
+              <div class="period-label">${days} ZILE</div>
+              <div class="chart-row">
+                <img src="${e.charts[days].traj}" alt="Traj ${days}z">
+                <img src="${e.charts[days].hist}" alt="Hist ${days}z">
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
     </div>
   `).join('');
 
@@ -149,27 +243,36 @@ function exportWatchlistHTML() {
 <html lang="ro"><head><meta charset="UTF-8">
 <title>Vandute de urmarit — MC.Stocks</title>
 <style>
-  body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #e0e0e0; padding: 32px; max-width: 860px; margin: auto; }
-  h1 { font-size: 22px; color: #4fc3f7; margin-bottom: 6px; }
-  .meta { font-size: 11px; color: rgba(255,255,255,0.35); margin-bottom: 28px; }
-  .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
-          border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; }
-  .card-header { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; margin-bottom: 10px; }
-  .ticker { font-size: 17px; font-weight: 700; color: #e0e0e0; }
-  .name   { font-size: 12px; color: rgba(255,255,255,0.45); }
-  .price  { font-size: 13px; font-weight: 600; color: #4fc3f7; }
-  .date   { font-size: 10px; color: rgba(255,255,255,0.28); margin-left: auto; }
-  .pills  { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
-  .pill   { font-size: 10.5px; padding: 2px 9px; border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.65); }
-  .comment { font-size: 11px; color: rgba(255,255,255,0.42); line-height: 1.6; margin-top: 6px; }
+  * { box-sizing: border-box; }
+  body { font-family:'Segoe UI',sans-serif; background:#0d0d1a; color:#e0e0e0;
+         padding:32px; max-width:980px; margin:auto; }
+  h1   { font-size:22px; color:#4fc3f7; margin-bottom:5px; }
+  .meta{ font-size:11px; color:rgba(255,255,255,0.35); margin-bottom:28px; }
+  .card{ background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1);
+         border-radius:10px; padding:18px 20px; margin-bottom:18px; }
+  .card-header{ display:flex; justify-content:space-between; align-items:flex-start;
+                flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .ticker{ font-size:18px; font-weight:700; color:#e0e0e0; margin-right:10px; }
+  .name  { font-size:12px; color:rgba(255,255,255,0.45); margin-right:10px; }
+  .price { font-size:14px; font-weight:600; color:#4fc3f7; }
+  .date  { font-size:10px; color:rgba(255,255,255,0.28); white-space:nowrap; }
+  .pills { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
+  .pill  { font-size:10.5px; padding:2px 9px; border-radius:12px;
+           border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.65); }
+  .comment{ font-size:11px; color:rgba(255,255,255,0.42); line-height:1.65; margin-bottom:12px; }
+  .charts-grid{ margin-top:12px; }
+  .chart-period{ margin-bottom:12px; }
+  .period-label{ font-size:10px; font-weight:600; color:rgba(255,255,255,0.35);
+                 letter-spacing:0.5px; text-transform:uppercase; margin-bottom:5px; }
+  .chart-row{ display:flex; gap:8px; }
+  .chart-row img{ width:49%; border-radius:6px; display:block; }
 </style></head><body>
 <h1>📌 Vandute de urmărit</h1>
 <div class="meta">Generat cu MC.Stocks · ${new Date().toLocaleDateString('ro-RO', {day:'2-digit',month:'long',year:'numeric'})}</div>
 ${rows}
 </body></html>`;
 
-  const blob = new Blob([html], { type: 'text/html' });
+  const blob = new Blob([html], { type:'text/html' });
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
   a.download = 'vandute-de-urmarit.html';
@@ -947,30 +1050,50 @@ async function runSimulation() {
     if (saveBtn) {
       saveBtn.style.display = 'inline-block';
       saveBtn.textContent   = '📌 Adaugă la urmărit';
-      saveBtn.onclick = () => {
-        const pills = [];
-        [['pill-sigma','info-sigma'],['pill-iv','info-iv'],['pill-skew','info-skew'],
-         ['pill-garch','info-garch'],['pill-nu','info-nu'],['pill-vol','info-vol'],
-         ['pill-pers','info-pers'],['pill-drift','info-drift'],
-         ['pill-ma60','info-ma50'],['pill-voltren','info-voltren'],
-        ].forEach(([pid, vid]) => {
-          const label = document.querySelector(`#${pid} .tip-wrap`)?.childNodes[0]?.textContent?.trim() || pid;
-          const val   = $( vid)?.textContent || '—';
-          pills.push(`${label} ${val}`);
-        });
-        const entry = {
-          ticker,
-          name:     name || ticker,
-          price:    fmt(currentPrice),
-          currency,
-          date:     new Date().toLocaleDateString('ro-RO', { day:'2-digit', month:'short', year:'numeric' }),
-          pills,
-          comment:  $('quality-comment')?.innerHTML || '',
-        };
-        saveToWatchlist(entry);
-        renderWatchlist();
-        saveBtn.textContent = '✓ Salvat!';
-        setTimeout(() => { saveBtn.textContent = '📌 Adaugă la urmărit'; }, 2000);
+      saveBtn.onclick = async () => {
+        saveBtn.textContent = '⏳ Se captează graficele...';
+        saveBtn.disabled    = true;
+
+        try {
+          // Captureaza graficele tuturor perioadelor
+          const charts = await captureChartsForWatchlist(periodResults, currentPrice, ticker);
+
+          // Colecteaza valorile pills
+          const pills = [];
+          [['pill-sigma','info-sigma'],['pill-iv','info-iv'],['pill-skew','info-skew'],
+           ['pill-garch','info-garch'],['pill-nu','info-nu'],['pill-vol','info-vol'],
+           ['pill-pers','info-pers'],['pill-drift','info-drift'],
+           ['pill-ma60','info-ma50'],['pill-voltren','info-voltren'],
+          ].forEach(([pid, vid]) => {
+            const label = document.querySelector(`#${pid} .tip-wrap`)?.childNodes[0]?.textContent?.trim() || pid;
+            const val   = $(vid)?.textContent || '—';
+            pills.push(`${label} ${val}`);
+          });
+
+          const now   = new Date();
+          const entry = {
+            ticker,
+            name:     name || ticker,
+            price:    fmt(currentPrice),
+            currency,
+            date:     now.toLocaleDateString('ro-RO', { day:'2-digit', month:'short', year:'numeric' }),
+            time:     now.toLocaleTimeString('ro-RO', { hour:'2-digit', minute:'2-digit' }),
+            pills,
+            comment:  $('quality-comment')?.innerHTML || '',
+            charts,
+          };
+
+          saveToWatchlist(entry);
+          renderWatchlist();
+          saveBtn.textContent = '✓ Salvat!';
+          setTimeout(() => { saveBtn.textContent = '📌 Adaugă la urmărit'; }, 2500);
+        } catch (err) {
+          console.error('Watchlist save error:', err);
+          saveBtn.textContent = '⚠ Eroare la salvare';
+          setTimeout(() => { saveBtn.textContent = '📌 Adaugă la urmărit'; }, 2500);
+        } finally {
+          saveBtn.disabled = false;
+        }
       };
     }
 

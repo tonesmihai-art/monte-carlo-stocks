@@ -136,7 +136,7 @@
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V21.2</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V21</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -194,39 +194,40 @@
 
         <div class="info-pills">
 
-          <!-- SIGMA -->
+          <!-- SIGMA + GARCH -->
           <div class="pill">
             <span class="tip-wrap">
               Sigma:
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
-                <strong>📊 Sigma — Volatilitate zilnica</strong>
-                Cat de mult variaza pretul intr-o singura zi. O sigma mare = traiectorii mai raspandite = risc mai mare, dar si potential de castig mai mare.
+                <strong>📊 Sigma + GARCH(1,1)</strong>
+                Primul numar = sigma statica (medie istorica). Al doilea = sigma GARCH conditionata — cat e volatilitatea <em>chiar acum</em>, estimata din ultimele 60 de zile.
                 <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 1%/zi — actiune stabila</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 1–2%/zi — volatilitate medie</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 3%/zi — actiune riscanta</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> 🟢 GARCH &lt; sigma — regim calm</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 🟡 GARCH ≈ sigma — regim normal</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> 🔴 GARCH &gt; sigma — regim agitat</div>
                 </div>
+                Simularea porneste cu GARCH actual si revine treptat la sigma istorica pe masura ce trece timpul.
                 <span class="tip-impact">Influenteaza: dispersia traiectoriilor</span>
               </div>
             </span>
             <span id="info-sigma">—</span>
           </div>
 
-          <!-- VOL. ANUALA -->
+          <!-- VOL. ANUALA + PERSISTENTA GARCH -->
           <div class="pill">
             <span class="tip-wrap">
               Vol. anuala:
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
-                <strong>📅 Volatilitate anuala</strong>
-                Sigma zilnica inmultita cu √252 (zile de tranzactionare/an). Arata riscul total al actiunii pe un an intreg.
+                <strong>📅 Volatilitate anuala + Persistenta GARCH</strong>
+                Primul numar = sigma × √252. Al doilea (pers.) = α+β din GARCH — cat de "lipicioasa" e volatilitatea.
                 <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 15%/an — actiune defensiva</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 15–30%/an — risc moderat</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 40%/an — actiune speculativa</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Pers. &lt; 85% — socurile dispar repede</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> Pers. 85–95% — volatilitate persistenta</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Pers. &gt; 95% — soc dureaza saptamani</div>
                 </div>
-                <span class="tip-impact">Influenteaza: latime interval de incredere</span>
+                <span class="tip-impact">Influenteaza: viteza de revenire la vol. normala</span>
               </div>
             </span>
             <span id="info-vol">—</span>

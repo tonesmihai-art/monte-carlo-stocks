@@ -315,6 +315,192 @@ export async function fetchVIX() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  PIPELINE DE FILTRARE SEMANTICA (metoda fonduri/banci)
+//  Separa stirile in 4 niveluri de relevanta:
+//   Tier 1 — impact direct (mentioneaza compania + eveniment financiar)
+//   Tier 2 — relevanta indirecta (sector/industrie related)
+//   Tier 3 — macro general (Fed, inflatie, PIB — fara legatura directa)
+//   Tier 4 — zgomot (clickbait, tagging gresit, feed duplicat)
+// ═══════════════════════════════════════════════════════════════
+
+// ── Profil de cuvinte-cheie per sector ───────────────
+// Folosit pentru "company profile embedding" — cu cat mai multe cuvinte
+// dintr-o stire se regasesc in profil, cu atat stirea e mai relevanta
+const SECTOR_PROFILE = {
+  'Technology':            ['tech','software','hardware','chip','semiconductor','ai',
+                            'cloud','data','digital','cyber','app','platform','code',
+                            'silicon','processor','gpu','cpu','saas','startup'],
+  'Energy':                ['oil','gas','energy','barrel','crude','refinery','pipeline',
+                            'petrol','lng','opec','renewable','solar','wind','coal',
+                            'fuel','drill','exploration','upstream','downstream'],
+  'Financial Services':    ['bank','banking','loan','credit','interest','mortgage',
+                            'fund','asset','capital','insurance','invest','portfolio',
+                            'finance','dividend','rate','yield','bond','treasury'],
+  'Healthcare':            ['drug','pharma','clinical','fda','trial','vaccine','therapy',
+                            'biotech','hospital','patient','medical','health','approval',
+                            'treatment','disease','cancer','genomic','biosimilar'],
+  'Consumer Cyclical':     ['retail','consumer','sales','store','brand','fashion','auto',
+                            'vehicle','car','electric','demand','shopping','luxury',
+                            'ecommerce','delivery','restaurant','travel','hotel'],
+  'Consumer Defensive':    ['food','beverage','tobacco','staple','grocery','packaged',
+                            'consumer','brand','household','personal','care','supply'],
+  'Industrials':           ['manufacturing','industrial','aerospace','defense','machine',
+                            'construction','logistics','transport','freight','supply',
+                            'infrastructure','factory','equipment','engineering'],
+  'Basic Materials':       ['steel','metal','copper','aluminum','chemical','mining',
+                            'commodity','iron','gold','silver','lithium','rare earth',
+                            'fertilizer','plastic','polymer','material'],
+  'Real Estate':           ['reit','property','real estate','mortgage','rent','lease',
+                            'building','office','residential','commercial','occupancy'],
+  'Utilities':             ['utility','electric','water','gas','grid','power','regulated',
+                            'infrastructure','transmission','distribution','renewable'],
+  'Communication Services':['media','telecom','streaming','content','social','network',
+                            'broadband','wireless','subscriber','advertising','platform'],
+  'Cryptocurrency':        ['bitcoin','crypto','blockchain','defi','token','wallet',
+                            'ethereum','exchange','mining','stablecoin','nft','web3'],
+  'Unknown':               [],
+};
+
+// ── Cuvinte de inalt impact financiar ────────────────
+// Prezenta lor alaturi de mentionarea companiei => Tier 1
+const HIGH_IMPACT_WORDS = new Set([
+  'earnings','revenue','profit','loss','dividend','acquisition','merger','buyout',
+  'bankruptcy','default','recall','lawsuit','ceo','layoff','ipo','spinoff',
+  'upgrade','downgrade','forecast','guidance','quarterly','annual','results',
+  'buyback','stake','deal','agreement','contract','partnership','fine','penalty',
+  'investigation','fraud','scandal','miss','beat','exceed','cut','raise','halted',
+]);
+
+// ── Pattern-uri de zgomot (Tier 4) ───────────────────
+const NOISE_PATTERNS = [
+  /^\d+ (stock|shares?|ticker)/i,        // "5 stocks to buy"
+  /top \d+/i,                            // "Top 10 stocks"
+  /\d+ (reason|thing|way)/i,             // "3 reasons to..."
+  /you (need|should|must|have to)/i,     // clickbait imperativ
+  /best stock/i,
+  /dont miss/i,
+  /secrets? (of|to)/i,
+  /\bvs\.?\b/i,                          // "AAPL vs MSFT" — comparatii generice
+  /investing in \d{4}/i,                 // "Investing in 2024"
+  /here.s why/i,
+];
+
+// ── Cosine similarity pe bag-of-words ────────────────
+// Compara doua seturi de cuvinte ponderate si returneaza similaritate 0-1
+function cosineSim(titleWords, profileWords) {
+  if (profileWords.size === 0) return 0;
+  let intersection = 0;
+  for (const w of titleWords) {
+    if (profileWords.has(w)) intersection++;
+  }
+  // Jaccard-like: intersectie / uniune (mai robust decat cosine pur pt texte scurte)
+  const union = new Set([...titleWords, ...profileWords]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+// ── Construieste profilul companiei ──────────────────
+// Returneaza doua seturi: identitate (ticker, nume) si domeniu (sector, industrie)
+function buildCompanyProfile(ticker, companyName, sector, industry) {
+  const identity = new Set();
+  const domain   = new Set();
+
+  // Ticker fara sufix (.DE, .RO, -USD etc.)
+  const tickerBase = ticker.toLowerCase().split('.')[0].split('-')[0];
+  identity.add(tickerBase);
+
+  // Cuvintele din numele companiei (peste 3 litere)
+  if (companyName) {
+    companyName.toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 3 && !['corp','inc','ltd','plc','gmbh','ag','sa','nv'].includes(w))
+      .forEach(w => identity.add(w));
+  }
+
+  // Cuvintele din industrie
+  if (industry) {
+    industry.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/)
+      .filter(w => w.length > 3)
+      .forEach(w => domain.add(w));
+  }
+
+  // Profilul sectorului
+  (SECTOR_PROFILE[sector] || []).forEach(w => domain.add(w));
+
+  return { identity, domain };
+}
+
+// ── Tokenizare titlu ──────────────────────────────────
+function tokenize(text) {
+  return new Set(
+    text.toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+  );
+}
+
+// ── Clasificare stire in 4 tiere ─────────────────────
+// Returneaza { tier, relevanta, categorie, weight }
+// weight = cat de mult conteaza scorul VADER al acestei stiri in calcul
+export function classifyNewsTier(titlu, ticker, companyName, sector, industry) {
+  const t      = titlu.toLowerCase();
+  const tokens = tokenize(titlu);
+  const { identity, domain } = buildCompanyProfile(ticker, companyName, sector, industry);
+
+  // ── Tier 4: Zgomot — eliminat din calcul ─────────────
+  if (NOISE_PATTERNS.some(p => p.test(titlu))) {
+    return { tier: 4, relevanta: 0, categorie: 'zgomot_clickbait', weight: 0 };
+  }
+
+  // ── Similaritate cu profilul companiei ───────────────
+  const simIdentitate = cosineSim(tokens, identity); // cat de mult vorbeste despre companie
+  const simDomeniu    = cosineSim(tokens, domain);   // cat de mult vorbeste despre sector
+
+  // Verifica daca stirea mentioneaza direct compania
+  const mentieDirect = simIdentitate > 0.08; // cel putin 1-2 cuvinte din identitate
+
+  // Verifica prezenta cuvintelor de inalt impact financiar
+  const areImpact = [...tokens].some(w => HIGH_IMPACT_WORDS.has(w));
+
+  // ── Tier 1: Impact direct ────────────────────────────
+  // Compania e mentionata + exista un eveniment financiar clar
+  if (mentieDirect && areImpact) {
+    return { tier: 1, relevanta: 0.90 + simIdentitate * 0.1, categorie: 'impact_direct', weight: 3.0 };
+  }
+
+  // Compania e mentionata fara eveniment explicit — totusi relevant
+  if (mentieDirect) {
+    return { tier: 1, relevanta: 0.65 + simIdentitate * 0.2, categorie: 'mentionare_directa', weight: 2.0 };
+  }
+
+  // ── Tier 2: Relevanta indirecta ──────────────────────
+  // Stire din acelasi sector/industrie cu impact financiar
+  if (simDomeniu > 0.15 && areImpact) {
+    return { tier: 2, relevanta: 0.45 + simDomeniu * 0.3, categorie: 'sector_cu_impact', weight: 1.0 };
+  }
+
+  // Stire din sector fara impact specific
+  if (simDomeniu > 0.10) {
+    return { tier: 2, relevanta: 0.25 + simDomeniu * 0.4, categorie: 'sector_general', weight: 0.5 };
+  }
+
+  // ── Tier 3: Macro ────────────────────────────────────
+  // Stire economica generala — influenteaza piata in general
+  const isMacro = [
+    'fed','ecb','inflation','gdp','interest rate','recession','central bank',
+    'market','economy','trade war','tariff','powell','lagarde','yield curve',
+  ].some(kw => t.includes(kw));
+
+  if (isMacro) {
+    return { tier: 3, relevanta: 0.20, categorie: 'macro_general', weight: 0.3 };
+  }
+
+  // ── Tier 4: Zgomot ───────────────────────────────────
+  return { tier: 4, relevanta: 0.05, categorie: 'zgomot_irelevant', weight: 0 };
+}
+
 // ── Keywords pentru cei 7 factori ────────────────────
 const FACTOR_KEYWORDS = {
   geopolitic:        ['war','conflict','sanction','nato','russia','ukraine','china',
@@ -481,7 +667,24 @@ export async function analyzeSentiment(ticker, companyName, onProgress) {
     return true;
   });
 
-  onProgress?.(`Analizez ${unice.length} stiri (sector: ${sector})...`);
+  onProgress?.(`Filtrez si clasific ${unice.length} stiri (pipeline semantic)...`);
+
+  // ── Pasul 1: Clasificare semantica a fiecarei stiri ─
+  // Fiecare stire primeste un tier (1-4) si un weight pentru scorul VADER
+  const tierStats = { t1: 0, t2: 0, t3: 0, t4: 0 };
+  const stiriFiltrate = unice.map(({ titlu, sursa }) => {
+    const clasificare = classifyNewsTier(titlu, ticker, companyName, sector, industry);
+    if (clasificare.tier === 1) tierStats.t1++;
+    else if (clasificare.tier === 2) tierStats.t2++;
+    else if (clasificare.tier === 3) tierStats.t3++;
+    else tierStats.t4++;
+    return { titlu, sursa, ...clasificare };
+  });
+
+  // Filtram complet Tier 4 (zgomot) — nu contribuie la scor
+  const stiriFiltrateCurate = stiriFiltrate.filter(s => s.tier < 4);
+
+  onProgress?.(`${stiriFiltrateCurate.length} stiri relevante din ${unice.length} (T1:${tierStats.t1} T2:${tierStats.t2} T3:${tierStats.t3} filtrat:${tierStats.t4})`);
 
   const FACTORS = ['geopolitic','inflatie_dobanzi','crize_financiare',
                    'pandemii_sanatate','tarife_comerciale','alegeri_politice','stiri_companie'];
@@ -489,10 +692,13 @@ export async function analyzeSentiment(ticker, companyName, onProgress) {
   const buckets = {};
   FACTORS.forEach(f => buckets[f] = []);
 
-  unice.forEach(({ titlu, sursa }) => {
-    const factor = assignFactor(titlu, ticker);
-    const score  = vaderScore(titlu);
-    buckets[factor].push({ titlu, sursa, score });
+  // ── Pasul 2: Asignare factor + scor VADER ponderat ──
+  // Scorul fiecarei stiri e amplificat/diminuat de weight-ul tier-ului
+  stiriFiltrateCurate.forEach(({ titlu, sursa, tier, weight, categorie, relevanta }) => {
+    const factor    = assignFactor(titlu, ticker);
+    const scorBrut  = vaderScore(titlu);
+    const scorAjust = scorBrut * weight; // Tier1 x3, Tier2 x1, Tier3 x0.3
+    buckets[factor].push({ titlu, sursa, score: scorBrut, scorAjust, tier, weight, categorie, relevanta });
   });
 
   const LABELS = {
@@ -509,11 +715,20 @@ export async function analyzeSentiment(ticker, companyName, onProgress) {
   const weightedScores = [];
   let totalWeight      = 0;
 
+  // ── Pasul 3: Calcul scor per factor cu medii ponderate ──
+  // In loc de medie simpla, folosim media ponderata de tier-weight
   FACTORS.forEach(factor => {
-    const items = buckets[factor];
-    const scor  = items.length > 0
-      ? items.reduce((s, i) => s + i.score, 0) / items.length
-      : 0;
+    const items      = buckets[factor];
+    let scorTotal    = 0;
+    let weightTotal  = 0;
+
+    items.forEach(item => {
+      scorTotal   += item.scorAjust;
+      weightTotal += item.weight;
+    });
+
+    // Medie ponderata (Tier1 conteaza de 3x mai mult decat Tier2)
+    const scor = weightTotal > 0 ? scorTotal / weightTotal : 0;
 
     const w = weights[factor] ?? 1.0;
     weightedScores.push(scor * w);
@@ -525,7 +740,8 @@ export async function analyzeSentiment(ticker, companyName, onProgress) {
       label:  LABELS[factor],
       impact: scor > 0.1 ? 'bullish' : scor < -0.1 ? 'bearish' : 'neutru',
       count:  items.length,
-      stiri:  items.slice(0, 5),
+      // Afisam stirile cele mai relevante primele (Tier1 > Tier2 > Tier3)
+      stiri:  items.sort((a, b) => a.tier - b.tier || b.relevanta - a.relevanta).slice(0, 5),
     };
   });
 
@@ -545,7 +761,9 @@ export async function analyzeSentiment(ticker, companyName, onProgress) {
     vix:             vixData,
     factori:         factoriResult,
     sentimentGlobal: +globalScore.toFixed(3),
-    totalStiri:      unice.length,
+    totalStiri:      stiriFiltrateCurate.length,  // dupa filtrare semantica
+    totalBrut:       unice.length,                // inainte de filtrare
+    tierStats,                                    // distributia pe tiere
     surse: {
       yahoo:         yahooNews.length,
       reuters:       reutersNews.length,

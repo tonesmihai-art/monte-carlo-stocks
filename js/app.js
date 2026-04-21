@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────
 
 import { calcParams, simulate, calcStats, percentilesPerDay,
-         adjustParams, NUM_SIMS } from './montecarlo.js';
+         adjustParams, NUM_SIMS, estimateGARCH } from './montecarlo.js';
 import { analyzeSentiment, fetchSectorData, fetchVIX } from './sentiment.js';
 import { drawPriceHistory, drawTrajectories,
          drawHistogram, drawSentiment, destroyAll, destroyPeriodCharts } from './charts.js';
@@ -256,11 +256,25 @@ async function runSimulation() {
     $('stock-ticker').textContent = ticker;
     drawPriceHistory('price-chart', dates.slice(-60), closes.slice(-60), ticker);
 
-    // ── 2. Parametri GBM ─────────────────────────────
-    setStatus('Calculez parametri GBM...');
-    const { drift, sigma, mean50, deviationPct, volumeTrend } = calcParams(closes, volumes);
-    $('info-sigma').textContent = `${(sigma * 100).toFixed(3)}%/zi`;
-    $('info-vol').textContent   = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}%/an`;
+    // ── 2. Parametri GBM + GARCH(1,1) ───────────────
+    setStatus('Calculez parametri GBM + GARCH(1,1)...');
+    const { drift, sigma, mean50, deviationPct, volumeTrend, garch } = calcParams(closes, volumes);
+
+    // Afiseaza sigma statica + sigma GARCH conditionata curent
+    if (garch) {
+      const sigmaGarchPct = (garch.sigma0 * 100).toFixed(3);
+      const sigmaStaticPct = (sigma * 100).toFixed(3);
+      const regime = garch.sigma0 > garch.sigmaLR * 1.15 ? '🔴 vol. ridicata'
+                   : garch.sigma0 < garch.sigmaLR * 0.85 ? '🟢 vol. calma'
+                   : '🟡 vol. normala';
+      $('info-sigma').textContent  = `${sigmaStaticPct}% → GARCH: ${sigmaGarchPct}%/zi`;
+      $('info-sigma').title        = `Sigma statica: ${sigmaStaticPct}%/zi | GARCH actual: ${sigmaGarchPct}%/zi | Regim: ${regime}`;
+      $('info-vol').textContent    = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}% | pers: ${(garch.persistence * 100).toFixed(1)}%`;
+      $('info-vol').title          = `Volatilitate anuala: ${(sigma * Math.sqrt(252)*100).toFixed(1)}%/an | Persistenta GARCH (α+β): ${(garch.persistence*100).toFixed(1)}% — cu cat mai aproape de 100%, cu atat dureaza mai mult un soc`;
+    } else {
+      $('info-sigma').textContent  = `${(sigma * 100).toFixed(3)}%/zi`;
+      $('info-vol').textContent    = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}%/an`;
+    }
     $('info-drift').textContent  = `${(drift * 100).toFixed(4)}%/zi`;
     $('info-ma50').textContent   = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
     $('info-voltren').textContent = volumeTrend?.label ?? '—';
@@ -339,9 +353,10 @@ async function runSimulation() {
     for (const days of PERIODS) {
       setStatus(`Simulez ${days} zile (${NUM_SIMS.toLocaleString()} scenarii)...`);
       await new Promise(r => setTimeout(r, 0));
-      const matrix    = simulate(currentPrice, drift, sigma, days, null, null, meanRevStrength, mean50);
+      // GARCH passat la ambele simulari — volatilitatea variaza in timp
+      const matrix    = simulate(currentPrice, drift, sigma, days, null,     null,     meanRevStrength, mean50, garch);
       const matrixAdj = driftAdj != null
-        ? simulate(currentPrice, drift, sigma, days, driftAdj, sigmaAdj, meanRevStrength, mean50) : null;
+        ? simulate(currentPrice, drift, sigma, days, driftAdj, sigmaAdj, meanRevStrength, mean50, garch) : null;
       periodResults[days] = {
         days,
         stats:    calcStats(matrix, days, currentPrice),
@@ -352,7 +367,7 @@ async function runSimulation() {
       };
     }
 
-    currentResult = { stock, periodResults, sentimentData, drift, sigma, driftAdj, sigmaAdj };
+    currentResult = { stock, periodResults, sentimentData, drift, sigma, driftAdj, sigmaAdj, garch };
 
     // ── 6. Salveaza istoric ──────────────────────────
     saveIstoric(ticker, `${currency} ${fmt(currentPrice)}`);

@@ -79,25 +79,21 @@ function saveToWatchlist(entry) {
 }
 
 // ── Captureaza graficele pentru toate perioadele ──────
+// Randeaza chart-uri proprii (nu reutilizeaza drawTrajectories/drawHistogram
+// care au variabile de modul trajChart/histChart cu efecte secundare).
 async function captureChartsForWatchlist(periodResults, currentPrice, ticker) {
-  const PERIODS_LIST = [30, 90, 180, 360];
-  const captures     = {};
+  const captures = {};
 
-  const prevAnim = Chart.defaults.animation;
-  Chart.defaults.animation = false;
-
-  // opacity:0.01 — browserul randeaza, dar nu se vede
-  // z-index:99999 — deasupra tuturor elementelor
+  // Container invizibil dar randat de browser (opacity 0.01, nu display:none)
   const tmpDiv = document.createElement('div');
   tmpDiv.style.cssText = [
-    'position:fixed', 'top:0', 'left:0',
-    'width:660px', 'height:200px',
+    'position:fixed', 'top:0', 'left:0', 'width:660px',
     'opacity:0.01', 'pointer-events:none',
-    'z-index:99999', 'overflow:hidden',
+    'z-index:99999', 'overflow:visible',
   ].join(';');
   document.body.appendChild(tmpDiv);
 
-  // Compoziteaza chart pe fundal dark si returneaza JPEG
+  // Compoziteaza pe fundal dark si returneaza JPEG data-URL
   function toJpeg(canvas) {
     try {
       const bg  = document.createElement('canvas');
@@ -107,55 +103,100 @@ async function captureChartsForWatchlist(periodResults, currentPrice, ticker) {
       ctx.fillStyle = '#0d0d1a';
       ctx.fillRect(0, 0, bg.width, bg.height);
       ctx.drawImage(canvas, 0, 0);
-      return bg.toDataURL('image/jpeg', 0.85);
-    } catch (e) { console.warn('toJpeg fail:', e); return null; }
+      return bg.toDataURL('image/jpeg', 0.82);
+    } catch (e) { return null; }
   }
 
   try {
-    for (const days of PERIODS_LIST) {
+    for (const days of [30, 90, 180, 360]) {
       const pd = periodResults[days];
-      if (!pd) { console.warn(`No periodResult for ${days}d`); continue; }
+      if (!pd) continue;
 
-      // IDs unici cu timestamp ca sa nu existe conflicte
-      const ts     = Date.now();
-      const trajId = `_wl_traj_${days}_${ts}`;
-      const histId = `_wl_hist_${days}_${ts}`;
-
-      tmpDiv.innerHTML = ''; // Curata iteratia anterioara
-
+      // Canvas-uri cu dimensiuni fixe (responsive:false le respecta)
       const trajC = document.createElement('canvas');
-      trajC.id = trajId; trajC.width = 370; trajC.height = 188;
+      trajC.width = 370; trajC.height = 188;
       const histC = document.createElement('canvas');
-      histC.id = histId; histC.width = 270; histC.height = 188;
-
+      histC.width = 270; histC.height = 188;
       tmpDiv.appendChild(trajC);
       tmpDiv.appendChild(histC);
 
-      // Randeaza
+      let chartTraj = null, chartHist = null;
       try {
-        drawTrajectories(trajId, pd.percs, pd.percsAdj, days, currentPrice, ticker);
-        drawHistogram(histId, pd.stats, pd.statsAdj, currentPrice, days);
+        // ── Traiectorii percentile ──────────────────────
+        const labels = Array.from({ length: days + 1 }, (_, i) => i);
+        chartTraj = new Chart(trajC.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              { label: 'P90', data: Array.from(pd.percs[90]), borderColor: '#66bb6a', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 },
+              { label: 'P50', data: Array.from(pd.percs[50]), borderColor: '#ffee58', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 },
+              { label: 'P10', data: Array.from(pd.percs[10]), borderColor: '#ef5350', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 },
+              { label: `$${currentPrice.toFixed(0)}`, data: Array(days + 1).fill(currentPrice), borderColor: 'rgba(255,255,255,0.3)', borderWidth: 1, borderDash: [4, 4], pointRadius: 0, fill: false },
+            ],
+          },
+          options: {
+            animation: false,
+            responsive: false,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#aaa', font: { size: 9 }, boxWidth: 12 } } },
+            scales: {
+              x: { ticks: { color: '#555577', maxTicksLimit: 6, font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+              y: { ticks: { color: '#555577', callback: v => `$${v.toFixed(0)}`, font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+            },
+          },
+        });
+
+        // ── Histograma distributie finala ───────────────
+        const allFinals = Array.from(pd.stats.finals);
+        const minVal    = pd.stats.min * 0.95;
+        const maxVal    = pd.stats.max * 1.05;
+        const nBins     = 40;
+        const binSize   = (maxVal - minVal) / nBins;
+        const bins      = Array(nBins).fill(0);
+        allFinals.forEach(v => {
+          const b = Math.min(Math.floor((v - minVal) / binSize), nBins - 1);
+          if (b >= 0) bins[b]++;
+        });
+        chartHist = new Chart(histC.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: Array.from({ length: nBins }, (_, i) => (minVal + i * binSize).toFixed(0)),
+            datasets: [{
+              data: bins,
+              backgroundColor: bins.map((_, i) =>
+                (minVal + i * binSize) >= currentPrice ? 'rgba(102,187,106,0.7)' : 'rgba(239,83,80,0.7)'
+              ),
+              borderWidth: 0,
+            }],
+          },
+          options: {
+            animation: false,
+            responsive: false,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: '#555577', maxTicksLimit: 5, font: { size: 8 } }, grid: { display: false } },
+              y: { ticks: { color: '#555577', font: { size: 8 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+            },
+          },
+        });
       } catch (drawErr) {
         console.error(`Draw error ${days}d:`, drawErr);
-        continue;
       }
 
-      // Asteapta randarea Chart.js
-      await new Promise(r => setTimeout(r, 280));
+      // Cu animation:false Chart.js randeaza sincron — nu e nevoie de wait lung
+      await new Promise(r => setTimeout(r, 60));
 
       const tj = toJpeg(trajC);
       const hj = toJpeg(histC);
       if (tj || hj) captures[days] = { traj: tj, hist: hj };
 
-      // Distruge instantele Chart.js
-      try { Chart.getChart(trajC)?.destroy(); } catch (_) {}
-      try { Chart.getChart(histC)?.destroy(); } catch (_) {}
+      // Curata imediat dupa captura
+      try { chartTraj?.destroy(); } catch (_) {}
+      try { chartHist?.destroy(); } catch (_) {}
     }
-  } catch (err) {
-    console.error('captureCharts error:', err);
-    throw err;
   } finally {
-    Chart.defaults.animation = prevAnim;
     try { document.body.removeChild(tmpDiv); } catch (_) {}
   }
 

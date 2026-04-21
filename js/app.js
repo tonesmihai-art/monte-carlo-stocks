@@ -1183,108 +1183,152 @@ window.toggleValuare = function() {
   icon.textContent = isOpen ? '▼ Extinde' : '▲ Restrânge';
 };
 
-// ── Fetch date fundamentale din Yahoo Finance ─────────
-// Incearca mai multe endpoint-uri si proxy-uri pana gaseste date
+// ── Fetch date fundamentale — replicare yfinance ──────
+// yfinance foloseste: 1) cookie de sesiune de pe fc.yahoo.com
+//                     2) crumb de pe query2/v1/test/getcrumb
+//                     3) quoteSummary cu crumb-ul obtinut
+// Replicam acest flux prin proxy-uri care fac fetch server-side.
 
-async function _yFetch(url, timeoutMs = 7000) {
+async function _yGet(url, timeoutMs = 8000) {
   const ctrl = new AbortController();
   const tid  = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const r = await fetch(url, {
       signal:  ctrl.signal,
-      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      headers: { Accept: 'application/json, text/plain, */*' },
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
-  } finally {
-    clearTimeout(tid);
+    const ct = r.headers.get('content-type') || '';
+    return ct.includes('json') ? r.json() : r.text();
+  } finally { clearTimeout(tid); }
+}
+
+// Proxies care fac fetch server-side (mentin sesiunea pe serverul lor)
+const _YPX = [
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+];
+
+async function _getYahooCrumb() {
+  // Pas 1: initializeaza sesiunea Yahoo (seteaza cookie pe serverul proxy)
+  // Pas 2: obtine crumb-ul (valid pentru sesiunea respectiva)
+  // !! Proxies stateless nu pastreaza cookie intre cereri →
+  //    unele proxy-uri (corsproxy.io) le trimit forward automat
+  const crumbUrls = [
+    'https://query2.finance.yahoo.com/v1/test/getcrumb',
+    'https://query1.finance.yahoo.com/v1/test/getcrumb',
+  ];
+  for (const px of _YPX) {
+    for (const u of crumbUrls) {
+      try {
+        const res = await _yGet(px(u), 5000);
+        const crumb = typeof res === 'string' ? res.trim() : null;
+        // Crumb valid: sir scurt, fara spatii, fara HTML
+        if (crumb && crumb.length > 2 && crumb.length < 30 && !crumb.includes('<')) {
+          return crumb;
+        }
+      } catch (_) {}
+    }
   }
+  return null; // fara crumb → incearca oricum, unele endpoint-uri nu-l cer
 }
 
 async function fetchValuationFundamentals(ticker) {
-  const PROXIES = [
-    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-  ];
+  // raw() accepta atat { raw: N } (formatted=true) cat si numere directe (formatted=false)
+  const raw = v => {
+    if (v == null) return null;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'object' && 'raw' in v) return v.raw;
+    return null;
+  };
 
-  const raw = v => (v?.raw != null ? v.raw : null);
+  // ── Pas 1: obtine crumb ───────────────────────────────
+  const crumb = await _getYahooCrumb();
+  const crumbQ = crumb ? `&crumb=${encodeURIComponent(crumb)}` : '';
 
-  // ── Strategia 1: quoteSummary (financialData + keyStats + balanceSheet) ──
-  const MODULES = 'financialData,defaultKeyStatistics,balanceSheetHistory';
+  // ── Pas 2: quoteSummary — identic cu ce face yfinance ─
+  // Aceleasi module folosite de yf.Ticker.info:
+  const MODULES = [
+    'financialData',
+    'defaultKeyStatistics',
+    'balanceSheetHistory',
+    'cashflowStatementHistory',
+  ].join(',');
+
   const SUMMARY_URLS = [
-    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&corsDomain=finance.yahoo.com`,
-    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}`,
-    `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${MODULES}`,
-    `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${MODULES}`,
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false&lang=en-US&region=US&corsDomain=finance.yahoo.com${crumbQ}`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false${crumbQ}`,
+    `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false${crumbQ}`,
+    // fara crumb ca fallback
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false&corsDomain=finance.yahoo.com`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false`,
   ];
 
   let summaryResult = null;
   outer1: for (const url of SUMMARY_URLS) {
-    for (const px of PROXIES) {
+    for (const px of _YPX) {
       try {
-        const json = await _yFetch(px(url));
-        const r    = json?.quoteSummary?.result?.[0];
-        if (r && (r.financialData || r.defaultKeyStatistics)) { summaryResult = r; break outer1; }
-      } catch (_) { /* incearca urmatorul */ }
+        const json = await _yGet(px(url));
+        if (typeof json !== 'object') continue;
+        const r = json?.quoteSummary?.result?.[0];
+        if (r?.financialData || r?.defaultKeyStatistics) { summaryResult = r; break outer1; }
+      } catch (_) {}
     }
   }
 
-  // ── Strategia 2: v7/quote (fallback pentru EPS + acțiuni) ──
+  // ── Pas 3: fallback v7/quote (EPS + actiuni fara crumb) ─
   let quoteResult = null;
-  const QUOTE_FIELDS = 'epsTrailingTwelveMonths,trailingEps,sharesOutstanding,freeCashflow,totalCash,totalDebt,earningsGrowth,revenueGrowth,bookValue,priceToBook';
-  const QUOTE_URLS = [
-    `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&fields=${QUOTE_FIELDS}`,
-    `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&fields=${QUOTE_FIELDS}`,
+  const Q_URLS = [
+    `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
+    `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
   ];
-
-  outer2: for (const url of QUOTE_URLS) {
-    for (const px of PROXIES) {
+  outer2: for (const url of Q_URLS) {
+    for (const px of _YPX) {
       try {
-        const json = await _yFetch(px(url));
-        const q    = json?.quoteResponse?.result?.[0];
-        if (q) { quoteResult = q; break outer2; }
-      } catch (_) { /* incearca urmatorul */ }
+        const json = await _yGet(px(url));
+        if (typeof json !== 'object') continue;
+        const q = json?.quoteResponse?.result?.[0];
+        if (q?.symbol) { quoteResult = q; break outer2; }
+      } catch (_) {}
     }
   }
 
-  if (!summaryResult && !quoteResult) throw new Error('Date indisponibile');
+  if (!summaryResult && !quoteResult) throw new Error('Date Yahoo indisponibile');
 
-  // ── Extrage valorile din ce am gasit ──
+  // ── Extrage campuri — aceleasi ca in yfinance info.get(...) ──
   const fd = summaryResult?.financialData        || {};
   const ks = summaryResult?.defaultKeyStatistics || {};
-  const bs = summaryResult?.balanceSheetHistory?.balanceSheetStatements?.[0] || {};
+  const bs = summaryResult?.balanceSheetHistory?.balanceSheetStatements?.[0]   || {};
+  const cf = summaryResult?.cashflowStatementHistory?.cashflowStatements?.[0]  || {};
   const q  = quoteResult || {};
 
-  // EPS — din quoteSummary sau v7/quote
-  const eps = raw(ks.trailingEps)
-           ?? q.epsTrailingTwelveMonths
-           ?? q.trailingEps
-           ?? null;
+  // info.get("trailingEps")
+  const eps = raw(ks.trailingEps) ?? q.epsTrailingTwelveMonths ?? q.trailingEps ?? null;
 
-  // Acțiuni în milioane
+  // info.get("sharesOutstanding")
   const sharesRaw = raw(ks.sharesOutstanding) ?? q.sharesOutstanding ?? null;
   const shares    = sharesRaw != null ? sharesRaw / 1e6 : null;
 
-  // FCF total → per acțiune
-  const fcfTotal    = raw(fd.freeCashflow) ?? (q.freeCashflow ?? null);
-  const fcfPerShare = (fcfTotal != null && sharesRaw > 0) ? fcfTotal / sharesRaw : null;
+  // info.get("freeCashflow") / sharesOutstanding
+  const fcfRaw      = raw(fd.freeCashflow) ?? raw(cf.freeCashflow) ?? q.freeCashflow ?? null;
+  const fcfPerShare = (fcfRaw != null && sharesRaw > 0) ? fcfRaw / sharesRaw : null;
 
-  // Cash ($M)
+  // info.get("totalCash")
   const cashRaw = raw(fd.totalCash) ?? raw(bs.cash) ?? q.totalCash ?? null;
   const cashM   = cashRaw != null ? cashRaw / 1e6 : null;
 
-  // Datorii ($M)
+  // info.get("totalDebt")
   const debtRaw = raw(fd.totalDebt) ?? q.totalDebt ?? null;
   const debtM   = debtRaw != null ? debtRaw / 1e6 : null;
 
-  // Active totale ($M)
+  // info.get("totalAssets")
   const assetsRaw = raw(bs.totalAssets) ?? null;
   const assetsM   = assetsRaw != null ? assetsRaw / 1e6 : null;
 
-  // Creștere FCF / earnings (%)
+  // info.get("earningsGrowth") — sau revenueGrowth ca fallback
   const growthRaw = raw(fd.earningsGrowth) ?? raw(fd.revenueGrowth)
-                 ?? q.earningsGrowth       ?? q.revenueGrowth ?? null;
+                 ?? q.earningsGrowth ?? q.revenueGrowth ?? null;
   const growth    = growthRaw != null ? growthRaw * 100 : null;
 
   return { eps, fcfPerShare, shares, totalAssets: assetsM, cash: cashM, debt: debtM, growth };

@@ -143,13 +143,72 @@
     .pill--red    { border-color: rgba(239,83,80,0.55)  !important; background: rgba(239,83,80,0.08)   !important; }
     .pill--gray   { border-color: rgba(136,136,136,0.35)!important; background: rgba(136,136,136,0.05) !important; }
     .pill--purple { border-color: rgba(206,147,216,0.5) !important; background: rgba(206,147,216,0.08) !important; }
+
+    /* ── Valuation Panel ─────────────────────────────── */
+    #valuation-panel {
+      background: rgba(79,195,247,0.03);
+      border: 1px solid rgba(79,195,247,0.18);
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 16px;
+    }
+    .val-header {
+      display: flex; justify-content: space-between; align-items: center;
+      cursor: pointer; user-select: none;
+    }
+    .val-title {
+      font-size: 12.5px; font-weight: 700; color: #4fc3f7; letter-spacing: 0.5px;
+    }
+    .val-toggle-btn {
+      background: none; border: 1px solid rgba(79,195,247,0.22);
+      color: rgba(255,255,255,0.35); cursor: pointer; font-size: 10.5px;
+      padding: 2px 10px; border-radius: 20px; transition: all 0.2s; font-weight: 600;
+    }
+    .val-toggle-btn:hover { color: #4fc3f7; border-color: rgba(79,195,247,0.5); }
+    .val-content { margin-top: 14px; }
+    .val-inputs-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(130px,1fr));
+      gap: 9px; margin-bottom: 14px;
+    }
+    .val-input-group { display: flex; flex-direction: column; gap: 3px; }
+    .val-input-group label {
+      font-size: 9.5px; color: rgba(255,255,255,0.38);
+      letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .val-input-group input, .val-input-group select {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 6px; padding: 5px 8px; color: #e0e0e0; font-size: 12px;
+      outline: none; transition: border-color 0.2s; width: 100%;
+    }
+    .val-input-group input:focus, .val-input-group select:focus {
+      border-color: rgba(79,195,247,0.5);
+    }
+    .val-input-group select option { background: #1a1a2e; }
+    .val-results-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(115px,1fr)); gap: 8px;
+    }
+    .val-method-card {
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px; padding: 9px 11px;
+    }
+    .vm-label { font-size: 9px; color: rgba(255,255,255,0.32); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 3px; }
+    .vm-val   { font-size: 15px; font-weight: 700; color: #e0e0e0; }
+    .vm-weight{ font-size: 9px; color: rgba(255,255,255,0.28); margin-top: 2px; }
+    .val-weighted-card {
+      background: rgba(79,195,247,0.07); border: 1px solid rgba(79,195,247,0.28);
+      border-radius: 8px; padding: 9px 11px;
+    }
+    .val-weighted-card .vm-label { color: rgba(79,195,247,0.65); }
+    .val-weighted-card .vm-val   { font-size: 17px; color: #4fc3f7; }
+    .val-margin-card { border-radius: 8px; padding: 9px 11px; }
+    .val-margin-card .vm-val { font-size: 17px; font-weight: 700; }
   </style>
 </head>
 <body>
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V25</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V18.4</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -199,6 +258,85 @@
     <div id="status" class="status" style="display:none"></div>
 
     <div id="results-section" style="display:none">
+
+      <!-- ── PANOU VALUARE FUNDAMENTALA ─────────────────── -->
+      <div id="valuation-panel" style="display:none">
+        <div class="val-header" onclick="toggleValuare()">
+          <span class="val-title">📐 Valuare Fundamentală
+            <span style="font-size:9.5px;color:rgba(255,255,255,0.3);font-weight:400;margin-left:8px;">
+              PE · FCF · NAV · DCF · Ponderat pe sector
+            </span>
+          </span>
+          <button class="val-toggle-btn" id="val-toggle-icon">▼ Extinde</button>
+        </div>
+        <div id="val-content" style="display:none">
+          <div class="val-inputs-grid">
+            <div class="val-input-group">
+              <label>Sector</label>
+              <select id="val-sector">
+                <option value="tech">Tech / Software</option>
+                <option value="energy">Energie (Oil&amp;Gas)</option>
+                <option value="utilitati">Utilitati / Retele</option>
+                <option value="asigurari">Asigurari</option>
+                <option value="conglomerate">Conglomerate / Ind.</option>
+                <option value="consum">Bunuri larg consum</option>
+                <option value="reit">REIT / Imobiliare</option>
+                <option value="shipping">Shipping / Transport</option>
+                <option value="tutun">Tutun / Tobacco</option>
+              </select>
+            </div>
+            <div class="val-input-group">
+              <label>EPS ($/acțiune)</label>
+              <input type="number" id="val-eps" placeholder="ex: 6.50" step="0.01">
+            </div>
+            <div class="val-input-group">
+              <label>P/E corect</label>
+              <input type="number" id="val-pe" placeholder="ex: 18" step="0.5">
+            </div>
+            <div class="val-input-group">
+              <label>FCF/acțiune ($)</label>
+              <input type="number" id="val-fcf" placeholder="ex: 5.20" step="0.01">
+            </div>
+            <div class="val-input-group">
+              <label>Creștere FCF (%)</label>
+              <input type="number" id="val-growth" placeholder="ex: 5" step="0.1" value="5">
+            </div>
+            <div class="val-input-group">
+              <label>WACC (%)</label>
+              <input type="number" id="val-wacc" placeholder="ex: 9" step="0.1" value="9">
+            </div>
+            <div class="val-input-group">
+              <label>Rata terminală (%)</label>
+              <input type="number" id="val-tgr" placeholder="ex: 2.5" step="0.1" value="2.5">
+            </div>
+            <div class="val-input-group">
+              <label>Active totale ($M)</label>
+              <input type="number" id="val-assets" placeholder="ex: 352583" step="1">
+            </div>
+            <div class="val-input-group">
+              <label>Cash ($M)</label>
+              <input type="number" id="val-cash" placeholder="ex: 67150" step="1">
+            </div>
+            <div class="val-input-group">
+              <label>Datorii ($M)</label>
+              <input type="number" id="val-debt" placeholder="ex: 108040" step="1">
+            </div>
+            <div class="val-input-group">
+              <label>Acțiuni (M)</label>
+              <input type="number" id="val-shares" placeholder="ex: 15441" step="1">
+            </div>
+          </div>
+          <div id="val-results-grid" class="val-results-grid">
+            <!-- populated dynamically -->
+          </div>
+          <div style="margin-top:10px;font-size:9.5px;color:rgba(255,255,255,0.22);line-height:1.6;">
+            NAV: (Active + Cash − Datorii) / Acțiuni_M &nbsp;·&nbsp;
+            DCF: FCF × (1+g)ⁿ actualizat cu WACC, 10 ani + valoare terminală &nbsp;·&nbsp;
+            Marja = (Val.Ponderata − Pret) / Pret
+          </div>
+        </div>
+      </div>
+
       <div class="stock-bar">
         <div>
           <div id="stock-name" class="stock-name">—</div>

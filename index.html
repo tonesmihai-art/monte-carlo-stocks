@@ -86,7 +86,6 @@
       visibility: visible;
       opacity: 1;
     }
-    /* Adjust bubble position for pills near edges */
     .tip-bubble.tip-left {
       left: auto;
       right: 0;
@@ -150,7 +149,7 @@
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V24.3</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V18.4</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -234,19 +233,42 @@
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
                 <strong>📉 Volatilitate Implicita (Optiuni)</strong>
-                Ce plateste piata <em>acum</em> pentru risc pe urmatoarele ~30 de zile — forward-looking, nu bazata pe trecut. Extrase din contractul ATM (la bani) cel mai apropiat de 30 zile.
+                Ce plateste piata <em>acum</em> pentru risc pe urmatoarele ~30 de zile — forward-looking, nu bazata pe trecut. Extrase din contractul ATM cel mai apropiat de 30 zile.
                 <div class="tip-scale" style="margin-top:5px">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> IV &lt; sigma istorica — piata calma, risc perceput redus</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> IV &lt; sigma istorica — piata calma</div>
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> IV ≈ sigma istorica — risc normal</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> IV &gt; sigma istorica — piata priceaza un eveniment (earnings, macro)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> IV &gt; sigma istorica — eveniment iminent</div>
                 </div>
                 <div style="margin-top:6px;font-size:10.5px">
-                  IV are greutate <b>70%</b> pentru simularea pe 30 zile si scade progresiv la <b>10%</b> pentru 360 de zile, unde volatilitatea istorica devine mai relevanta.
+                  IV are greutate <b>70%</b> pe 30 zile si scade la <b>10%</b> pe 360 zile.
                 </div>
                 <span class="tip-impact">Influenteaza: sigma in simulare, mai ales pe termen scurt</span>
               </div>
             </span>
             <span id="info-iv">—</span>
+          </div>
+
+          <!-- PUT/CALL SKEW -->
+          <div class="pill" id="pill-skew">
+            <span class="tip-wrap">
+              Skew:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>📐 Put/Call Skew — Directie implicita</strong>
+                Diferenta de IV intre put-urile OTM (~7% sub pret) si call-urile OTM (~7% peste pret). Reflecta cat de mult se teme piata de o scadere vs cat spera la o crestere.
+                <div class="tip-scale" style="margin-top:5px">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 0% — call-uri mai scumpe, sentiment bullish (rar)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 0–8% — skew normal pentru actiuni</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> 8–15% — teama crescuta de scadere</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 15% — protectie impotriva crashului</div>
+                </div>
+                <div style="margin-top:6px;font-size:10.5px">
+                  Skew ridicat → drift ajustat in jos. Skew negativ (neobisnuit) → drift ajustat in sus.
+                </div>
+                <span class="tip-impact">Influenteaza: drift in ambele simulari (clasica + AI)</span>
+              </div>
+            </span>
+            <span id="info-skew">—</span>
           </div>
 
           <!-- GARCH ACTUAL -->
@@ -275,7 +297,7 @@
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
                 <strong>📉 Distributie Student-t(ν)</strong>
-                Distributia normala subestimeaza dramatic crashurile — un -5σ ar trebui sa apara o data la 14.000 de ani, dar se intampla de cateva ori pe deceniu. Student-t corecteaza asta prin cozi mai groase.
+                Distributia normala subestimeaza dramatic crashurile. Student-t corecteaza asta prin cozi mai groase.
                 <div class="tip-scale" style="margin-top:5px">
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> ν = 3–4 — cozi f. groase (crypto)</div>
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> ν = 5–7 — cozi groase (TSLA, NVDA)</div>
@@ -314,7 +336,7 @@
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
                 <strong>🔄 Persistenta GARCH (α+β)</strong>
-                Cat de "lipicioasa" e volatilitatea — cat timp dureaza un soc pana se disipa. α+β aproape de 1 = socul persista saptamani.
+                Cat de "lipicioasa" e volatilitatea — cat timp dureaza un soc pana se disipa.
                 <div class="tip-scale">
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 85% — socurile dispar rapid</div>
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 85–95% — volatilitate persistenta</div>

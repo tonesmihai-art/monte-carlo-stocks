@@ -587,12 +587,22 @@ async function fetchStockData(ticker) {
     new Date(ts * 1000).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short' })
   ).filter((_, i) => result.indicators.quote[0].close[i] != null);
   const meta = result.meta;
+
+  // Extrage fundamentale din meta (disponibile fara crumb, acelasi apel)
+  const sharesRaw = meta.sharesOutstanding ?? null;
+  const fundamentals = {
+    eps:    meta.epsTrailingTwelveMonths ?? null,
+    shares: sharesRaw != null ? sharesRaw / 1e6 : null,
+    // FCF, active, cash, datorii nu sunt in chart meta → vin din quoteSummary
+  };
+
   return {
     closes, dates, volumes,
     currentPrice: closes[closes.length - 1],
     ticker:       meta.symbol,
     currency:     meta.currency || 'USD',
     name:         meta.longName || meta.shortName || ticker,
+    fundamentals,
   };
 }
 
@@ -1210,128 +1220,139 @@ const _YPX = [
   u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
 
-async function _getYahooCrumb() {
-  // Pas 1: initializeaza sesiunea Yahoo (seteaza cookie pe serverul proxy)
-  // Pas 2: obtine crumb-ul (valid pentru sesiunea respectiva)
-  // !! Proxies stateless nu pastreaza cookie intre cereri →
-  //    unele proxy-uri (corsproxy.io) le trimit forward automat
-  const crumbUrls = [
-    'https://query2.finance.yahoo.com/v1/test/getcrumb',
-    'https://query1.finance.yahoo.com/v1/test/getcrumb',
-  ];
-  for (const px of _YPX) {
-    for (const u of crumbUrls) {
-      try {
-        const res = await _yGet(px(u), 5000);
-        const crumb = typeof res === 'string' ? res.trim() : null;
-        // Crumb valid: sir scurt, fara spatii, fara HTML
-        if (crumb && crumb.length > 2 && crumb.length < 30 && !crumb.includes('<')) {
-          return crumb;
-        }
-      } catch (_) {}
-    }
-  }
-  return null; // fara crumb → incearca oricum, unele endpoint-uri nu-l cer
+// ── SEC EDGAR — date bilant din rapoarte 10-K ────────
+// API public, CORS activat nativ, fara autentificare, fara proxy
+// Sursa: aceleasi date ca yfinance (SEC filings)
+
+let _secTickerCache = null; // cache in memorie pentru sesiune
+
+async function _secGet(url, ms = 10000) {
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error(`SEC ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(tid); }
 }
 
-async function fetchValuationFundamentals(ticker) {
-  // raw() accepta atat { raw: N } (formatted=true) cat si numere directe (formatted=false)
-  const raw = v => {
-    if (v == null) return null;
-    if (typeof v === 'number') return v;
-    if (typeof v === 'object' && 'raw' in v) return v.raw;
-    return null;
-  };
+async function _secCIK(ticker) {
+  // Curata suffix bursier: BATS.L → BATS, BTC-USD → BTC
+  const clean = ticker.split('.')[0].split('-')[0].toUpperCase();
 
-  // ── Pas 1: obtine crumb ───────────────────────────────
-  const crumb = await _getYahooCrumb();
-  const crumbQ = crumb ? `&crumb=${encodeURIComponent(crumb)}` : '';
-
-  // ── Pas 2: quoteSummary — identic cu ce face yfinance ─
-  // Aceleasi module folosite de yf.Ticker.info:
-  const MODULES = [
-    'financialData',
-    'defaultKeyStatistics',
-    'balanceSheetHistory',
-    'cashflowStatementHistory',
-  ].join(',');
-
-  const SUMMARY_URLS = [
-    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false&lang=en-US&region=US&corsDomain=finance.yahoo.com${crumbQ}`,
-    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false${crumbQ}`,
-    `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false${crumbQ}`,
-    // fara crumb ca fallback
-    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false&corsDomain=finance.yahoo.com`,
-    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&formatted=false`,
-  ];
-
-  let summaryResult = null;
-  outer1: for (const url of SUMMARY_URLS) {
-    for (const px of _YPX) {
-      try {
-        const json = await _yGet(px(url));
-        if (typeof json !== 'object') continue;
-        const r = json?.quoteSummary?.result?.[0];
-        if (r?.financialData || r?.defaultKeyStatistics) { summaryResult = r; break outer1; }
-      } catch (_) {}
-    }
+  // Cache in localStorage (1MB, valabil 24h)
+  if (!_secTickerCache) {
+    try {
+      const stored = localStorage.getItem('_sec_tickers');
+      if (stored) {
+        const { ts, map } = JSON.parse(stored);
+        if (Date.now() - ts < 86400000) { _secTickerCache = map; }
+      }
+    } catch (_) {}
   }
 
-  // ── Pas 3: fallback v7/quote (EPS + actiuni fara crumb) ─
-  let quoteResult = null;
-  const Q_URLS = [
+  if (!_secTickerCache) {
+    const raw = await _secGet('https://www.sec.gov/files/company_tickers.json', 15000);
+    _secTickerCache = raw;
+    try {
+      localStorage.setItem('_sec_tickers', JSON.stringify({ ts: Date.now(), map: raw }));
+    } catch (_) {}
+  }
+
+  const entry = Object.values(_secTickerCache)
+    .find(c => c.ticker?.toUpperCase() === clean);
+  return entry ? String(entry.cik_str).padStart(10, '0') : null;
+}
+
+// Extrage ultima valoare anuala (10-K) dintr-un concept XBRL
+function _secLatest(json, unit = 'USD') {
+  const arr = json?.units?.[unit];
+  if (!arr) return null;
+  return arr
+    .filter(d => (d.form === '10-K' || d.form === '10-K/A') && d.val != null)
+    .sort((a, b) => new Date(b.end) - new Date(a.end))[0]?.val ?? null;
+}
+
+async function _fetchSEC(ticker) {
+  const cik = await _secCIK(ticker);
+  if (!cik) throw new Error(`${ticker} nu e in SEC EDGAR (ticker non-US?)`);
+
+  const B = `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap`;
+
+  // Fetch toate conceptele in paralel — fiecare e un JSON mic (~50-200KB)
+  const [rAssets, rCash, rDebt, rOpCF, rCapex, rShares] = await Promise.allSettled([
+    _secGet(`${B}/Assets.json`),
+    _secGet(`${B}/CashAndCashEquivalentsAtCarryingValue.json`),
+    _secGet(`${B}/LongTermDebt.json`),
+    _secGet(`${B}/NetCashProvidedByUsedInOperatingActivities.json`),
+    _secGet(`${B}/PaymentsToAcquirePropertyPlantAndEquipment.json`),
+    _secGet(`${B}/CommonStockSharesOutstanding.json`),
+  ]);
+
+  const get  = (r, unit = 'USD') => r.status === 'fulfilled' ? _secLatest(r.value, unit) : null;
+
+  const assets  = get(rAssets);
+  const cash    = get(rCash);
+  const debt    = get(rDebt);
+  const opCF    = get(rOpCF);
+  const capex   = get(rCapex);
+  const sharesN = get(rShares, 'shares'); // CommonStockSharesOutstanding e in 'shares', nu 'USD'
+
+  // FCF = Operating CF - CapEx (ambele in USD)
+  const fcf = opCF != null ? opCF - (capex ?? 0) : null;
+
+  return {
+    totalAssets: assets  != null ? assets  / 1e6 : null,
+    cash:        cash    != null ? cash    / 1e6 : null,
+    debt:        debt    != null ? debt    / 1e6 : null,
+    shares:      sharesN != null ? sharesN / 1e6 : null,
+    fcfPerShare: (fcf != null && sharesN > 0) ? fcf / sharesN : null,
+  };
+}
+
+// Growth rate din Yahoo v7/quote (forward-looking, nu e in SEC)
+async function _fetchGrowth(ticker) {
+  const urls = [
     `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
     `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
   ];
-  outer2: for (const url of Q_URLS) {
+  for (const url of urls) {
     for (const px of _YPX) {
       try {
-        const json = await _yGet(px(url));
+        const json = await _yGet(px(url), 6000);
         if (typeof json !== 'object') continue;
         const q = json?.quoteResponse?.result?.[0];
-        if (q?.symbol) { quoteResult = q; break outer2; }
+        if (!q) continue;
+        const g = q.earningsGrowth ?? q.revenueGrowth ?? null;
+        if (g != null) return g * 100;
       } catch (_) {}
     }
   }
+  return null;
+}
 
-  if (!summaryResult && !quoteResult) throw new Error('Date Yahoo indisponibile');
+async function fetchValuationFundamentals(ticker) {
+  // Ruleaza SEC + growth in paralel
+  const [secResult, growthResult] = await Promise.allSettled([
+    _fetchSEC(ticker),
+    _fetchGrowth(ticker),
+  ]);
 
-  // ── Extrage campuri — aceleasi ca in yfinance info.get(...) ──
-  const fd = summaryResult?.financialData        || {};
-  const ks = summaryResult?.defaultKeyStatistics || {};
-  const bs = summaryResult?.balanceSheetHistory?.balanceSheetStatements?.[0]   || {};
-  const cf = summaryResult?.cashflowStatementHistory?.cashflowStatements?.[0]  || {};
-  const q  = quoteResult || {};
+  const sec    = secResult.status    === 'fulfilled' ? secResult.value    : {};
+  const growth = growthResult.status === 'fulfilled' ? growthResult.value : null;
 
-  // info.get("trailingEps")
-  const eps = raw(ks.trailingEps) ?? q.epsTrailingTwelveMonths ?? q.trailingEps ?? null;
+  // Daca SEC nu a returnat nimic util, arunca eroare
+  const hasData = Object.values(sec).some(v => v != null);
+  if (!hasData && growth == null) throw new Error('Date indisponibile (ticker non-US sau SEC offline)');
 
-  // info.get("sharesOutstanding")
-  const sharesRaw = raw(ks.sharesOutstanding) ?? q.sharesOutstanding ?? null;
-  const shares    = sharesRaw != null ? sharesRaw / 1e6 : null;
-
-  // info.get("freeCashflow") / sharesOutstanding
-  const fcfRaw      = raw(fd.freeCashflow) ?? raw(cf.freeCashflow) ?? q.freeCashflow ?? null;
-  const fcfPerShare = (fcfRaw != null && sharesRaw > 0) ? fcfRaw / sharesRaw : null;
-
-  // info.get("totalCash")
-  const cashRaw = raw(fd.totalCash) ?? raw(bs.cash) ?? q.totalCash ?? null;
-  const cashM   = cashRaw != null ? cashRaw / 1e6 : null;
-
-  // info.get("totalDebt")
-  const debtRaw = raw(fd.totalDebt) ?? q.totalDebt ?? null;
-  const debtM   = debtRaw != null ? debtRaw / 1e6 : null;
-
-  // info.get("totalAssets")
-  const assetsRaw = raw(bs.totalAssets) ?? null;
-  const assetsM   = assetsRaw != null ? assetsRaw / 1e6 : null;
-
-  // info.get("earningsGrowth") — sau revenueGrowth ca fallback
-  const growthRaw = raw(fd.earningsGrowth) ?? raw(fd.revenueGrowth)
-                 ?? q.earningsGrowth ?? q.revenueGrowth ?? null;
-  const growth    = growthRaw != null ? growthRaw * 100 : null;
-
-  return { eps, fcfPerShare, shares, totalAssets: assetsM, cash: cashM, debt: debtM, growth };
+  return {
+    fcfPerShare: sec.fcfPerShare ?? null,
+    shares:      sec.shares      ?? null,
+    totalAssets: sec.totalAssets ?? null,
+    cash:        sec.cash        ?? null,
+    debt:        sec.debt        ?? null,
+    growth,
+  };
 }
 
 function setValInput(id, value, decimals = 2) {
@@ -1343,7 +1364,7 @@ function setValInput(id, value, decimals = 2) {
   setTimeout(() => { el.style.borderColor = ''; }, 1200);
 }
 
-function initValuarePanel(currentPrice, currency, yahooSector, ticker) {
+function initValuarePanel(currentPrice, currency, yahooSector, ticker, metaFundamentals = {}) {
   const panel = $('valuation-panel');
   if (!panel) return;
 
@@ -1375,27 +1396,42 @@ function initValuarePanel(currentPrice, currency, yahooSector, ticker) {
   }
 
   panel.style.display = 'block';
+
+  // ── Pas 1: populare imediata din meta chart (acelasi apel deja reusit) ──
+  const statusEl = ensureValStatus();
+  let metaPopulated = 0;
+  if (metaFundamentals.eps    != null) { setValInput('eps',    metaFundamentals.eps,    2); metaPopulated++; }
+  if (metaFundamentals.shares != null) { setValInput('shares', metaFundamentals.shares, 0); metaPopulated++; }
+
+  if (metaPopulated > 0) {
+    statusEl.textContent = `✔ EPS + acțiuni din chart API · se descarcă FCF, cash, datorii...`;
+    statusEl.style.color = 'rgba(102,187,106,0.55)';
+  } else {
+    statusEl.textContent = '⏳ Se descarcă date fundamentale...';
+    statusEl.style.color = 'rgba(255,255,255,0.4)';
+  }
   updateValuare();
 
-  // ── Fetch fundamentale din Yahoo Finance (async, dupa afisare) ──
+  // ── Pas 2: quoteSummary async pentru restul campurilor ──
   if (!ticker) return;
-  const statusEl = ensureValStatus();
-  statusEl.textContent = '⏳ Se descarcă date fundamentale...';
-  statusEl.style.color = 'rgba(255,255,255,0.4)';
-
   fetchValuationFundamentals(ticker).then(d => {
-    setValInput('eps',    d.eps,         2);
+    // Suprascrie EPS/shares doar daca meta nu le-a dat
+    if (metaFundamentals.eps    == null && d.eps         != null) setValInput('eps',    d.eps,         2);
+    if (metaFundamentals.shares == null && d.shares      != null) setValInput('shares', d.shares,      0);
+    // FCF, cash, datorii, active, growth vin doar din quoteSummary
     setValInput('fcf',    d.fcfPerShare, 2);
-    setValInput('shares', d.shares,      0);
     setValInput('assets', d.totalAssets, 0);
     setValInput('cash',   d.cash,        0);
     setValInput('debt',   d.debt,        0);
     if (d.growth != null) setValInput('growth', d.growth, 1);
-    statusEl.textContent = '✔ Date din Yahoo Finance · P/E corect, WACC și rata terminală — completează manual';
+    statusEl.textContent = '✔ Date Yahoo Finance · P/E corect, WACC, rata terminală — completează manual';
     statusEl.style.color = 'rgba(102,187,106,0.65)';
     updateValuare();
   }).catch(err => {
-    statusEl.textContent = '⚠ Date fundamentale indisponibile — completează manual';
+    const msg = metaPopulated > 0
+      ? '⚠ FCF/cash/datorii indisponibile — completează manual'
+      : '⚠ Date fundamentale indisponibile — completează manual';
+    statusEl.textContent = msg;
     statusEl.style.color = 'rgba(255,167,38,0.6)';
     console.warn('Val fetch error:', err);
   });
@@ -1442,7 +1478,7 @@ async function runSimulation() {
     // ── 1. Date istorice ─────────────────────────────
     setStatus(`Descarc date pentru ${ticker}...`);
     const stock = await fetchStockData(ticker);
-    const { closes, dates, volumes, currentPrice, currency, name } = stock;
+    const { closes, dates, volumes, currentPrice, currency, name, fundamentals } = stock;
     $('stock-name').textContent   = name;
     $('stock-price').textContent  = `${currency} ${fmt(currentPrice)}`;
     $('stock-ticker').textContent = ticker;
@@ -1538,9 +1574,9 @@ async function runSimulation() {
       if (sectorResult.status === 'fulfilled') {
         renderSectorBadge(sectorResult.value.sector, sectorResult.value.industry,
                           vixData, sectorResult.value.weights);
-        initValuarePanel(currentPrice, currency, sectorResult.value.sector, ticker);
+        initValuarePanel(currentPrice, currency, sectorResult.value.sector, ticker, fundamentals);
       } else {
-        initValuarePanel(currentPrice, currency, null, ticker);
+        initValuarePanel(currentPrice, currency, null, ticker, fundamentals);
       }
     }
 

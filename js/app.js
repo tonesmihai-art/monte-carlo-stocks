@@ -1183,7 +1183,60 @@ window.toggleValuare = function() {
   icon.textContent = isOpen ? '▼ Extinde' : '▲ Restrânge';
 };
 
-function initValuarePanel(currentPrice, currency, yahooSector) {
+// ── Fetch date fundamentale din Yahoo Finance ─────────
+async function fetchValuationFundamentals(ticker) {
+  const modules = 'financialData,defaultKeyStatistics,balanceSheetHistory,cashflowStatementHistory';
+  const url     = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`;
+  const proxy   = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+
+  const r    = await fetch(proxy, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const data = await r.json();
+  const res  = data?.quoteSummary?.result?.[0];
+  if (!res) throw new Error('Fara date fundamentale');
+
+  const fd  = res.financialData         || {};
+  const ks  = res.defaultKeyStatistics  || {};
+  const bs  = res.balanceSheetHistory?.balanceSheetStatements?.[0] || {};
+  const cf  = res.cashflowStatementHistory?.cashflowStatements?.[0] || {};
+
+  const raw = v => (v?.raw != null ? v.raw : null);
+
+  // EPS trailing ($/acțiune)
+  const eps = raw(ks.trailingEps);
+
+  // Acțiuni în circulație → milioane
+  const sharesRaw = raw(ks.sharesOutstanding);
+  const shares    = sharesRaw != null ? sharesRaw / 1e6 : null;
+
+  // FCF total → per acțiune
+  const fcfTotal    = raw(fd.freeCashflow) ?? raw(cf.freeCashflow);
+  const fcfPerShare = (fcfTotal != null && sharesRaw > 0) ? fcfTotal / sharesRaw : null;
+
+  // Bilanț ($M)
+  const totalAssets = raw(bs.totalAssets) != null ? raw(bs.totalAssets) / 1e6 : null;
+  const cashRaw     = raw(fd.totalCash) ?? raw(bs.cash);
+  const cashM       = cashRaw != null ? cashRaw / 1e6 : null;
+  const debtRaw     = raw(fd.totalDebt);
+  const debtM       = debtRaw != null ? debtRaw / 1e6 : null;
+
+  // Creștere estimată (%)
+  const growthRaw = raw(fd.earningsGrowth) ?? raw(fd.revenueGrowth);
+  const growth    = growthRaw != null ? growthRaw * 100 : null;
+
+  return { eps, fcfPerShare, shares, totalAssets, cash: cashM, debt: debtM, growth };
+}
+
+function setValInput(id, value, decimals = 2) {
+  const el = $(`val-${id}`);
+  if (!el || value == null || !isFinite(value)) return;
+  el.value = parseFloat(value.toFixed(decimals));
+  // Flash vizual — bordura scurta verde ca sa se vada ca a venit din API
+  el.style.borderColor = 'rgba(102,187,106,0.7)';
+  setTimeout(() => { el.style.borderColor = ''; }, 1200);
+}
+
+function initValuarePanel(currentPrice, currency, yahooSector, ticker) {
   const panel = $('valuation-panel');
   if (!panel) return;
 
@@ -1216,6 +1269,41 @@ function initValuarePanel(currentPrice, currency, yahooSector) {
 
   panel.style.display = 'block';
   updateValuare();
+
+  // ── Fetch fundamentale din Yahoo Finance (async, dupa afisare) ──
+  if (!ticker) return;
+  const statusEl = ensureValStatus();
+  statusEl.textContent = '⏳ Se descarcă date fundamentale...';
+  statusEl.style.color = 'rgba(255,255,255,0.4)';
+
+  fetchValuationFundamentals(ticker).then(d => {
+    setValInput('eps',    d.eps,         2);
+    setValInput('fcf',    d.fcfPerShare, 2);
+    setValInput('shares', d.shares,      0);
+    setValInput('assets', d.totalAssets, 0);
+    setValInput('cash',   d.cash,        0);
+    setValInput('debt',   d.debt,        0);
+    if (d.growth != null) setValInput('growth', d.growth, 1);
+    statusEl.textContent = '✔ Date din Yahoo Finance · P/E corect, WACC și rata terminală — completează manual';
+    statusEl.style.color = 'rgba(102,187,106,0.65)';
+    updateValuare();
+  }).catch(err => {
+    statusEl.textContent = '⚠ Date fundamentale indisponibile — completează manual';
+    statusEl.style.color = 'rgba(255,167,38,0.6)';
+    console.warn('Val fetch error:', err);
+  });
+}
+
+function ensureValStatus() {
+  let el = $('val-fetch-status');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'val-fetch-status';
+  el.style.cssText = 'font-size:10px;margin-top:6px;letter-spacing:0.3px;';
+  const header = document.querySelector('#valuation-panel .val-header');
+  if (header) header.after(el);
+  else $('valuation-panel')?.appendChild(el);
+  return el;
 }
 
 // ── Simulare principala ───────────────────────────────
@@ -1230,7 +1318,16 @@ async function runSimulation() {
   const sectorBadgeEl = $('sector-badge');
   if (sectorBadgeEl) sectorBadgeEl.style.display = 'none';
   const valPanel = $('valuation-panel');
-  if (valPanel) valPanel.style.display = 'none';
+  if (valPanel) {
+    valPanel.style.display = 'none';
+    // Sterge valorile din simularea anterioara (fetch nou la rulare)
+    ['eps','fcf','shares','assets','cash','debt'].forEach(id => {
+      const el = $(`val-${id}`);
+      if (el) el.value = '';
+    });
+    const statusEl = $('val-fetch-status');
+    if (statusEl) statusEl.textContent = '';
+  }
   $('run-btn').disabled    = true;
   $('run-btn').textContent = 'Se ruleaza...';
 
@@ -1334,9 +1431,9 @@ async function runSimulation() {
       if (sectorResult.status === 'fulfilled') {
         renderSectorBadge(sectorResult.value.sector, sectorResult.value.industry,
                           vixData, sectorResult.value.weights);
-        initValuarePanel(currentPrice, currency, sectorResult.value.sector);
+        initValuarePanel(currentPrice, currency, sectorResult.value.sector, ticker);
       } else {
-        initValuarePanel(currentPrice, currency, null);
+        initValuarePanel(currentPrice, currency, null, ticker);
       }
     }
 

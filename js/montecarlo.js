@@ -365,20 +365,47 @@ export function calcStats(matrix, days, currentPrice) {
   };
 }
 
-// Percentile per zi (pentru graficul de traiectorii)
-export function percentilesPerDay(matrix, days, pcts = [10, 50, 90]) {
+// ── Percentile per zi (pentru graficul de traiectorii) ──
+//
+// step > 1: sorteaza doar la fiecare `step` zile, interpoleaza liniar intre ele.
+// Economie: 30d→step=1 (31), 90d→step=2 (46), 180d→step=3 (61), 360d→step=5 (73)
+// Total: 211 sorturi in loc de 664. Vizual identic — Chart.js face smoothing oricum.
+//
+export function percentilesPerDay(matrix, days, pcts = [10, 50, 90], step = 1) {
   const result = {};
   pcts.forEach(p => result[p] = new Float64Array(days + 1));
 
-  for (let day = 0; day <= days; day++) {
-    const offset  = day * NUM_SIMS;
-    const dayVals = new Float64Array(NUM_SIMS);
-    for (let i = 0; i < NUM_SIMS; i++) dayVals[i] = matrix[offset + i];
-    dayVals.sort();
+  // Buffer refolosit — evita 664 × 240 KB de alocari cu presiune pe GC
+  const buf = new Float64Array(NUM_SIMS);
+
+  // Checkpoints exacte (prima si ultima zi mereu incluse)
+  const checkpoints = new Set([0, days]);
+  for (let d = step; d < days; d += step) checkpoints.add(d);
+  const checkSorted = Array.from(checkpoints).sort((a, b) => a - b);
+
+  for (const day of checkSorted) {
+    const offset = day * NUM_SIMS;
+    buf.set(matrix.subarray(offset, offset + NUM_SIMS)); // subarray: zero-copy view
+    buf.sort();
     pcts.forEach(p => {
-      result[p][day] = dayVals[Math.floor((p / 100) * (NUM_SIMS - 1))];
+      result[p][day] = buf[Math.floor((p / 100) * (NUM_SIMS - 1))];
     });
   }
+
+  // Interpolare liniara intre checkpoints
+  if (step > 1) {
+    for (let i = 0; i < checkSorted.length - 1; i++) {
+      const a = checkSorted[i], b = checkSorted[i + 1];
+      if (b - a <= 1) continue;
+      pcts.forEach(p => {
+        const va = result[p][a], vb = result[p][b];
+        for (let d = a + 1; d < b; d++) {
+          result[p][d] = va + (vb - va) * (d - a) / (b - a);
+        }
+      });
+    }
+  }
+
   return result;
 }
 

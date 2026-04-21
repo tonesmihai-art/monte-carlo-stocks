@@ -1118,10 +1118,29 @@ async function runSimulation() {
     setPillColor('pill-voltren', vtColor);
     $('info-voltren').textContent = volumeTrend?.label ?? '—';
 
-    // ── 2b. Volatilitate implicita din optiuni (IV) + Skew ──
-    setStatus('Caut volatilitate implicita si skew din optiuni...');
+    // ── 2b. IV + Sector + VIX in paralel ────────────────
+    // Toate trei sunt independente de IV — le lansam simultan
+    setStatus('Caut IV, sector si VIX in paralel...');
     let ivData = null;
-    try { ivData = await fetchImpliedVolatility(ticker, currentPrice, msg => setStatus(msg)); } catch (e) { /* silent */ }
+    let sectorWeights = null;
+    let vixData       = { vix: null, vixLabel: 'N/A', vixImpact: 0 };
+    {
+      const [ivResult, sectorResult, vixResult] = await Promise.allSettled([
+        fetchImpliedVolatility(ticker, currentPrice, msg => setStatus(msg)),
+        fetchSectorData(ticker),
+        fetchVIX(),
+      ]);
+      if (ivResult.status === 'fulfilled')     ivData        = ivResult.value;
+      if (sectorResult.status === 'fulfilled') {
+        sectorWeights = sectorResult.value.weights;
+        // Badge-ul se randeaza dupa ce avem si VIX
+      }
+      if (vixResult.status === 'fulfilled')    vixData       = vixResult.value;
+      if (sectorResult.status === 'fulfilled') {
+        renderSectorBadge(sectorResult.value.sector, sectorResult.value.industry,
+                          vixData, sectorResult.value.weights);
+      }
+    }
 
     // ── Fallback: IV estimat din VIX + sigma istorica ──
     // Folosit cand API-urile de optiuni nu raspund (EU/RO stocks, CORS, etc.)
@@ -1129,11 +1148,8 @@ async function runSimulation() {
     if (!ivData) {
       setStatus('IV: calculez estimat din VIX + caracteristici actiune...');
       try {
-        const vixFallback = await Promise.race([
-          fetchVIX(),
-          new Promise(res => setTimeout(() => res(null), 4000)),
-        ]);
-        const vixVal = vixFallback?.vix;
+        const vixVal = vixData?.vix   // deja descarcat in paralel
+          ?? (await Promise.race([fetchVIX(), new Promise(r => setTimeout(() => r(null), 4000))]))?.vix;
         if (vixVal && vixVal > 0) {
           const sigmaAnnual = sigma * Math.sqrt(252);
           const vixDaily    = (vixVal / 100) / Math.sqrt(252);
@@ -1229,19 +1245,6 @@ async function runSimulation() {
     // Raport de ajustare pentru sigmaAdj (calculat mai tarziu, dupa sentiment)
     let sigmaAdjRatio = null;
 
-    // ── 3. Sector + VIX (independent, intotdeauna rulat) ─
-    setStatus('Detectez sector si VIX...');
-    let sectorWeights = null;
-    let vixData       = { vix: null, vixLabel: 'N/A', vixImpact: 0 };
-    try {
-      const sectorInfo = await fetchSectorData(ticker);
-      sectorWeights    = sectorInfo.weights;
-      vixData          = await fetchVIX();
-      renderSectorBadge(sectorInfo.sector, sectorInfo.industry, vixData, sectorInfo.weights);
-    } catch (e) {
-      console.warn('Sector/VIX error:', e);
-    }
-
     // ── 4. Sentiment AI ──────────────────────────────
     let sentimentData = null;
     let driftAdj = null, sigmaAdj = null, meanRevStrength = 0;
@@ -1302,7 +1305,10 @@ async function runSimulation() {
     }
 
     // ── 5. Monte Carlo ───────────────────────────────
-    const PERIODS       = [30, 90, 180, 360];
+    const PERIODS = [30, 90, 180, 360];
+    // step per perioadă: 30d→1 (exact), 90d→2, 180d→3, 360d→5
+    // Reduce sorturi: 211 in loc de 664 — fara diferenta vizuala
+    const PERC_STEP = { 30: 1, 90: 2, 180: 3, 360: 5 };
     const periodResults = {};
     for (const days of PERIODS) {
       setStatus(`Simulez ${days} zile (${NUM_SIMS.toLocaleString()} scenarii)...`);
@@ -1317,15 +1323,16 @@ async function runSimulation() {
       const driftSkewed    = drift    + skewDriftAdj;
       const driftAdjSkewed = driftAdj != null ? driftAdj + skewDriftAdj : null;
 
-      const matrix    = simulate(currentPrice, driftSkewed, sigmaBlended, days, null,          null,          meanRevStrength, mean50, garch, nu);
+      const step      = PERC_STEP[days];
+      const matrix    = simulate(currentPrice, driftSkewed, sigmaBlended, days, null, null, meanRevStrength, mean50, garch, nu);
       const matrixAdj = driftAdjSkewed != null
         ? simulate(currentPrice, driftSkewed, sigmaBlended, days, driftAdjSkewed, sigmaAdjBlended, meanRevStrength, mean50, garch, nu) : null;
       periodResults[days] = {
         days,
         stats:    calcStats(matrix, days, currentPrice),
         statsAdj: matrixAdj ? calcStats(matrixAdj, days, currentPrice) : null,
-        percs:    percentilesPerDay(matrix, days),
-        percsAdj: matrixAdj ? percentilesPerDay(matrixAdj, days) : null,
+        percs:    percentilesPerDay(matrix, days, [10, 50, 90], step),
+        percsAdj: matrixAdj ? percentilesPerDay(matrixAdj, days, [10, 50, 90], step) : null,
         currentPrice, currency, ticker,
       };
     }

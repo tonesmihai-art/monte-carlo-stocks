@@ -238,6 +238,7 @@ const TICKER_SECTOR_MAP = {
   // Netherlands (.AS)
   'APAM.AS':{ sector: 'Basic Materials',        industry: 'Steel' },
   'ASML.AS':{ sector: 'Technology',             industry: 'Semiconductor Equipment & Materials' },
+  'VPK.AS': { sector: 'Energy',                 industry: 'Oil & Gas Integrated' },
   // Romania (.RO)
   'TLV.RO': { sector: 'Financial Services',     industry: 'Banks — Regional' },
   'SNP.RO': { sector: 'Energy',                 industry: 'Oil & Gas Integrated' },

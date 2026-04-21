@@ -87,9 +87,22 @@ async function captureChartsForWatchlist(periodResults, currentPrice, ticker) {
   const prevAnim = Chart.defaults.animation;
   Chart.defaults.animation = false;
 
+  // Container vizibil dar invizibil — Chart.js nu randeaza in off-screen
   const tmpDiv = document.createElement('div');
-  tmpDiv.style.cssText = 'position:fixed;top:-9999px;left:-9999px;pointer-events:none;width:1px;height:1px;overflow:visible;';
+  tmpDiv.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;z-index:-9999;display:flex;flex-wrap:wrap;width:760px;';
   document.body.appendChild(tmpDiv);
+
+  // Compoziteaza canvas-ul chart pe un fundal colorat si returneaza dataURL
+  function canvasToJpeg(canvas, bg = '#0f0f1e') {
+    const out = document.createElement('canvas');
+    out.width  = canvas.width;
+    out.height = canvas.height;
+    const ctx  = out.getContext('2d');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(canvas, 0, 0);
+    return out.toDataURL('image/jpeg', 0.88);
+  }
 
   try {
     for (const days of PERIODS_LIST) {
@@ -99,27 +112,34 @@ async function captureChartsForWatchlist(periodResults, currentPrice, ticker) {
       const trajId = `_wl_traj_${days}`;
       const histId = `_wl_hist_${days}`;
 
+      // Canvas mic: 360x190 traiectorii, 280x190 histograma
       const trajCanvas = document.createElement('canvas');
-      trajCanvas.id = trajId; trajCanvas.width = 520; trajCanvas.height = 220;
+      trajCanvas.id = trajId;
+      trajCanvas.width  = 360; trajCanvas.height = 190;
+      trajCanvas.style.cssText = 'width:360px;height:190px;display:block;';
+
       const histCanvas = document.createElement('canvas');
-      histCanvas.id = histId; histCanvas.width = 380; histCanvas.height = 220;
+      histCanvas.id = histId;
+      histCanvas.width  = 280; histCanvas.height = 190;
+      histCanvas.style.cssText = 'width:280px;height:190px;display:block;';
 
       tmpDiv.appendChild(trajCanvas);
       tmpDiv.appendChild(histCanvas);
 
+      // Randeaza graficele
       drawTrajectories(trajId, pd.percs, pd.percsAdj, days, currentPrice, ticker);
       drawHistogram(histId, pd.stats, pd.statsAdj, currentPrice, days);
 
-      // Asteapta un tick pentru Chart.js sa randeze
-      await new Promise(r => setTimeout(r, 80));
+      // Asteapta randarea completa
+      await new Promise(r => setTimeout(r, 200));
 
-      // Captura ca JPEG (mai mic decat PNG)
+      // Captura cu fundal adaugat
       captures[days] = {
-        traj: trajCanvas.toDataURL('image/jpeg', 0.82),
-        hist: histCanvas.toDataURL('image/jpeg', 0.82),
+        traj: canvasToJpeg(trajCanvas),
+        hist: canvasToJpeg(histCanvas),
       };
 
-      // Distruge instantele Chart.js si elementele
+      // Curata
       Chart.getChart(trajCanvas)?.destroy();
       Chart.getChart(histCanvas)?.destroy();
       tmpDiv.removeChild(trajCanvas);

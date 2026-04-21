@@ -136,7 +136,7 @@
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V24</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V18.4</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -194,21 +194,30 @@
 
         <div class="info-pills">
 
-          <!-- SIGMA + GARCH -->
+          <!-- SIGMA + GARCH + Student-t -->
           <div class="pill">
             <span class="tip-wrap">
               Sigma:
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
-                <strong>📊 Sigma + GARCH(1,1)</strong>
-                Primul numar = sigma statica (medie istorica). Al doilea = sigma GARCH conditionata — cat e volatilitatea <em>chiar acum</em>, estimata din ultimele 60 de zile.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> 🟢 GARCH &lt; sigma — regim calm</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 🟡 GARCH ≈ sigma — regim normal</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> 🔴 GARCH &gt; sigma — regim agitat</div>
+                <strong>📊 Sigma + GARCH(1,1) + Student-t(ν)</strong>
+                <em style="color:#aaa;font-size:10px">3 modele combinate</em>
+                <div class="tip-scale" style="margin-top:5px">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#4fc3f7"></span> <b>Sigma statica</b> — media istorica a volatilitatii zilnice</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> <b>GARCH actual</b> — volatilitatea conditionata <em>acum</em> (ultimele 60 zile). 🟢 calm / 🟡 normal / 🔴 agitat</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ce93d8"></span> <b>ν (Student-t)</b> — coada distributiei: cat de des apar crashuri extreme</div>
                 </div>
-                Simularea porneste cu GARCH actual si revine treptat la sigma istorica pe masura ce trece timpul.
-                <span class="tip-impact">Influenteaza: dispersia traiectoriilor</span>
+                <div style="margin-top:6px;font-size:10.5px">
+                  Distributia <b>normala</b> (Gauss) subestimeaza dramatic evenimentele extreme — un crash de -5σ ar trebui sa apara o data la 14.000 ani, dar se intampla de cateva ori pe deceniu.<br><br>
+                  <b>Student-t(ν)</b> corecteaza asta: cu cat ν e mai mic, cu atat cozile sunt mai groase si crashurile mai frecvente in simulare.
+                </div>
+                <div class="tip-scale" style="margin-top:5px">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> ν = 3–4 — cozi f. groase (crypto, penny stocks)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> ν = 5–7 — cozi groase (TSLA, NVDA, actiuni volatile)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> ν = 8–15 — cozi medii (actiuni normale)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> ν &gt; 20 — practic normal (indici diversificati)</div>
+                </div>
+                <span class="tip-impact">Influenteaza: frecventa si amplitudinea evenimentelor extreme</span>
               </div>
             </span>
             <span id="info-sigma">—</span>

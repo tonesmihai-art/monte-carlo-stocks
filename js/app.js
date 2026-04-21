@@ -1220,87 +1220,90 @@ const _YPX = [
   u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
 
-// ── SEC EDGAR — date bilant din rapoarte 10-K ────────
-// API public, CORS activat nativ, fara autentificare, fara proxy
-// Sursa: aceleasi date ca yfinance (SEC filings)
-
-let _secTickerCache = null; // cache in memorie pentru sesiune
-
-async function _secGet(url, ms = 10000) {
-  const ctrl = new AbortController();
-  const tid  = setTimeout(() => ctrl.abort(), ms);
+// ── Fetch robustez: direct + fallback proxy ───────────
+async function _robustGet(url, ms = 10000) {
+  // Incearca direct (pentru SEC data.sec.gov care are CORS nativ)
   try {
-    const r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
-    if (!r.ok) throw new Error(`SEC ${r.status}`);
-    return await r.json();
-  } finally { clearTimeout(tid); }
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+      clearTimeout(tid);
+      if (r.ok) {
+        const ct = r.headers.get('content-type') || '';
+        return ct.includes('json') ? r.json() : r.text();
+      }
+    } finally { clearTimeout(tid); }
+  } catch (_) {}
+  // Fallback prin proxy (pentru www.sec.gov care poate bloca CORS)
+  for (const px of _YPX) {
+    try {
+      const j = await _yGet(px(url), Math.min(ms, 8000));
+      if (j != null) return j;
+    } catch (_) {}
+  }
+  throw new Error(`Fetch esuat: ${url.split('/').slice(-1)[0]}`);
 }
 
+// ── SEC EDGAR — date bilant din rapoarte 10-K ─────────
+let _secTickerCache = null;
+
 async function _secCIK(ticker) {
-  // Curata suffix bursier: BATS.L → BATS, BTC-USD → BTC
   const clean = ticker.split('.')[0].split('-')[0].toUpperCase();
 
-  // Cache in localStorage (1MB, valabil 24h)
+  // Cache localStorage (valabil 24h)
   if (!_secTickerCache) {
     try {
-      const stored = localStorage.getItem('_sec_tickers');
-      if (stored) {
-        const { ts, map } = JSON.parse(stored);
-        if (Date.now() - ts < 86400000) { _secTickerCache = map; }
+      const s = localStorage.getItem('_sec_tk');
+      if (s) {
+        const { ts, d } = JSON.parse(s);
+        if (Date.now() - ts < 86_400_000) _secTickerCache = d;
       }
     } catch (_) {}
   }
-
   if (!_secTickerCache) {
-    const raw = await _secGet('https://www.sec.gov/files/company_tickers.json', 15000);
+    // www.sec.gov nu are CORS → folosim proxy
+    const raw = await _robustGet('https://www.sec.gov/files/company_tickers.json', 18000);
     _secTickerCache = raw;
-    try {
-      localStorage.setItem('_sec_tickers', JSON.stringify({ ts: Date.now(), map: raw }));
-    } catch (_) {}
+    try { localStorage.setItem('_sec_tk', JSON.stringify({ ts: Date.now(), d: raw })); } catch (_) {}
   }
 
-  const entry = Object.values(_secTickerCache)
-    .find(c => c.ticker?.toUpperCase() === clean);
+  const entry = Object.values(_secTickerCache).find(c => c.ticker?.toUpperCase() === clean);
   return entry ? String(entry.cik_str).padStart(10, '0') : null;
 }
 
-// Extrage ultima valoare anuala (10-K) dintr-un concept XBRL
 function _secLatest(json, unit = 'USD') {
   const arr = json?.units?.[unit];
   if (!arr) return null;
   return arr
-    .filter(d => (d.form === '10-K' || d.form === '10-K/A') && d.val != null)
+    .filter(d => d.val != null && /^10-K/.test(d.form))
     .sort((a, b) => new Date(b.end) - new Date(a.end))[0]?.val ?? null;
 }
 
 async function _fetchSEC(ticker) {
   const cik = await _secCIK(ticker);
-  if (!cik) throw new Error(`${ticker} nu e in SEC EDGAR (ticker non-US?)`);
+  if (!cik) throw new Error(`${ticker} nu e in SEC`);
 
+  // data.sec.gov are CORS nativ → fetch direct (+ proxy fallback)
   const B = `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap`;
-
-  // Fetch toate conceptele in paralel — fiecare e un JSON mic (~50-200KB)
-  const [rAssets, rCash, rDebt, rOpCF, rCapex, rShares] = await Promise.allSettled([
-    _secGet(`${B}/Assets.json`),
-    _secGet(`${B}/CashAndCashEquivalentsAtCarryingValue.json`),
-    _secGet(`${B}/LongTermDebt.json`),
-    _secGet(`${B}/NetCashProvidedByUsedInOperatingActivities.json`),
-    _secGet(`${B}/PaymentsToAcquirePropertyPlantAndEquipment.json`),
-    _secGet(`${B}/CommonStockSharesOutstanding.json`),
+  const [rA, rC, rD, rOCF, rCapex, rSh] = await Promise.allSettled([
+    _robustGet(`${B}/Assets.json`),
+    _robustGet(`${B}/CashAndCashEquivalentsAtCarryingValue.json`),
+    _robustGet(`${B}/LongTermDebt.json`),
+    _robustGet(`${B}/NetCashProvidedByUsedInOperatingActivities.json`),
+    _robustGet(`${B}/PaymentsToAcquirePropertyPlantAndEquipment.json`),
+    _robustGet(`${B}/CommonStockSharesOutstanding.json`),
   ]);
 
-  const get  = (r, unit = 'USD') => r.status === 'fulfilled' ? _secLatest(r.value, unit) : null;
+  const v   = (r, u = 'USD') => r.status === 'fulfilled' ? _secLatest(r.value, u) : null;
+  const assets = v(rA);
+  const cash   = v(rC);
+  const debt   = v(rD);
+  const opCF   = v(rOCF);
+  const capex  = v(rCapex);
+  const sharesN = v(rSh, 'shares');
 
-  const assets  = get(rAssets);
-  const cash    = get(rCash);
-  const debt    = get(rDebt);
-  const opCF    = get(rOpCF);
-  const capex   = get(rCapex);
-  const sharesN = get(rShares, 'shares'); // CommonStockSharesOutstanding e in 'shares', nu 'USD'
-
-  // FCF = Operating CF - CapEx (ambele in USD)
   const fcf = opCF != null ? opCF - (capex ?? 0) : null;
-
   return {
     totalAssets: assets  != null ? assets  / 1e6 : null,
     cash:        cash    != null ? cash    / 1e6 : null,
@@ -1310,49 +1313,58 @@ async function _fetchSEC(ticker) {
   };
 }
 
-// Growth rate din Yahoo v7/quote (forward-looking, nu e in SEC)
-async function _fetchGrowth(ticker) {
+// ── Yahoo v7/quote — EPS + growth (fara crumb, prin proxy) ──
+async function _fetchYahooQuote(ticker) {
   const urls = [
     `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
     `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
+    `https://query2.finance.yahoo.com/v8/finance/quote?symbols=${ticker}`,
+    `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${ticker}`,
   ];
   for (const url of urls) {
     for (const px of _YPX) {
       try {
-        const json = await _yGet(px(url), 6000);
+        const json = await _yGet(px(url), 7000);
         if (typeof json !== 'object') continue;
-        const q = json?.quoteResponse?.result?.[0];
+        const q = json?.quoteResponse?.result?.[0] ?? json?.quoteSummary?.result?.[0];
         if (!q) continue;
-        const g = q.earningsGrowth ?? q.revenueGrowth ?? null;
-        if (g != null) return g * 100;
+        return {
+          eps:    q.epsTrailingTwelveMonths ?? q.trailingEps ?? null,
+          growth: q.earningsGrowth != null ? q.earningsGrowth * 100
+                : q.revenueGrowth  != null ? q.revenueGrowth  * 100 : null,
+          shares: q.sharesOutstanding != null ? q.sharesOutstanding / 1e6 : null,
+        };
       } catch (_) {}
     }
   }
-  return null;
+  return {};
 }
 
 async function fetchValuationFundamentals(ticker) {
-  // Ruleaza SEC + growth in paralel
-  const [secResult, growthResult] = await Promise.allSettled([
-    _fetchSEC(ticker),
-    _fetchGrowth(ticker),
-  ]);
+  const isUS = !ticker.includes('.') && !ticker.includes('-');
 
-  const sec    = secResult.status    === 'fulfilled' ? secResult.value    : {};
-  const growth = growthResult.status === 'fulfilled' ? growthResult.value : null;
+  const tasks = isUS
+    ? [_fetchSEC(ticker), _fetchYahooQuote(ticker)]
+    : [Promise.resolve({}), _fetchYahooQuote(ticker)];
 
-  // Daca SEC nu a returnat nimic util, arunca eroare
-  const hasData = Object.values(sec).some(v => v != null);
-  if (!hasData && growth == null) throw new Error('Date indisponibile (ticker non-US sau SEC offline)');
+  const [secR, quoteR] = await Promise.allSettled(tasks);
+  const sec   = secR.status   === 'fulfilled' ? secR.value   : {};
+  const quote = quoteR.status === 'fulfilled' ? quoteR.value : {};
 
-  return {
-    fcfPerShare: sec.fcfPerShare ?? null,
-    shares:      sec.shares      ?? null,
-    totalAssets: sec.totalAssets ?? null,
-    cash:        sec.cash        ?? null,
-    debt:        sec.debt        ?? null,
-    growth,
+  const result = {
+    eps:         quote.eps                  ?? null,
+    growth:      quote.growth               ?? null,
+    shares:      sec.shares   ?? quote.shares ?? null,
+    fcfPerShare: sec.fcfPerShare            ?? null,
+    totalAssets: sec.totalAssets            ?? null,
+    cash:        sec.cash                   ?? null,
+    debt:        sec.debt                   ?? null,
   };
+
+  if (Object.values(result).every(v => v == null)) {
+    throw new Error('Date indisponibile');
+  }
+  return result;
 }
 
 function setValInput(id, value, decimals = 2) {
@@ -1416,14 +1428,13 @@ function initValuarePanel(currentPrice, currency, yahooSector, ticker, metaFunda
   if (!ticker) return;
   fetchValuationFundamentals(ticker).then(d => {
     // Suprascrie EPS/shares doar daca meta nu le-a dat
-    if (metaFundamentals.eps    == null && d.eps         != null) setValInput('eps',    d.eps,         2);
-    if (metaFundamentals.shares == null && d.shares      != null) setValInput('shares', d.shares,      0);
-    // FCF, cash, datorii, active, growth vin doar din quoteSummary
+    if (metaFundamentals.eps    == null) setValInput('eps',    d.eps,    2);
+    if (metaFundamentals.shares == null) setValInput('shares', d.shares, 0);
     setValInput('fcf',    d.fcfPerShare, 2);
     setValInput('assets', d.totalAssets, 0);
     setValInput('cash',   d.cash,        0);
     setValInput('debt',   d.debt,        0);
-    if (d.growth != null) setValInput('growth', d.growth, 1);
+    setValInput('growth', d.growth,      1);
     statusEl.textContent = '✔ Date Yahoo Finance · P/E corect, WACC, rata terminală — completează manual';
     statusEl.style.color = 'rgba(102,187,106,0.65)';
     updateValuare();

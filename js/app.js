@@ -551,15 +551,41 @@ async function runSimulation() {
         ]);
         const vixVal = vixFallback?.vix;
         if (vixVal && vixVal > 0) {
-          const sigmaAnnual  = sigma * Math.sqrt(252);
-          // IV ≈ sigma * (VIX / VIX_neutral) * premium_factor
-          // VIX_neutral = 20 (medie istorica pe termen lung)
-          // premium_factor = 1.12 (IV > HV cu ~12% in medie)
-          const ivEstAnnual = sigmaAnnual * (vixVal / 20) * 1.12;
+          const sigmaAnnual = sigma * Math.sqrt(252);
+          const vixDaily    = (vixVal / 100) / Math.sqrt(252);
+
+          // ── Factor 1: agresivitatea actiunii vs piata ──
+          // sigmaVsMarket < 0.8 → actiune defensiva (VZ, KO, NEE)
+          // sigmaVsMarket 1-2   → actiune normala (JPM, XOM)
+          // sigmaVsMarket > 2.5 → actiune speculativa (NVDA, TSLA)
+          const sigmaVsMarket = sigma / Math.max(vixDaily, 0.0001);
+          const ivPremium = sigmaVsMarket < 0.8  ? 1.05   // defensive
+                          : sigmaVsMarket < 1.2  ? 1.10   // aproape de piata
+                          : sigmaVsMarket < 1.8  ? 1.15   // usor speculativ
+                          : sigmaVsMarket < 2.5  ? 1.22   // speculativ
+                          :                        1.32;  // foarte speculativ
+
+          // ── Factor 2: persistenta GARCH ───────────────
+          // Persistenta mare → vol cluster → piata anticipeaza volatilitate sustinuta
+          const garchPersAdj = garch
+            ? Math.max(0.85, Math.min(1.20, 1 + (garch.persistence - 0.85) * 0.6))
+            : 1.0;
+
+          // ── Factor 3: cozi distributiei (Student-t ν) ─
+          // ν mic → cozi groase → tail risk premium in optiuni
+          const tailAdj = nu < 5 ? 1.18 : nu < 8 ? 1.09 : nu < 15 ? 1.04 : 1.0;
+
+          // ── IV estimat final ───────────────────────────
+          const ivEstAnnual = sigmaAnnual * (vixVal / 20) * ivPremium * garchPersAdj * tailAdj;
           const ivEstDaily  = ivEstAnnual / Math.sqrt(252);
-          // Skew estimat: creste cu VIX (frica = put-uri mai scumpe)
-          // VIX=15→0%, VIX=20→3%, VIX=30→9%
-          const skewEst = Math.max(0, (vixVal - 15) * 0.006);
+
+          // ── Skew estimat specific actiunii ────────────
+          // Actiuni mai volatile = mai mult fear premium pe puts → skew mai mare
+          // VIX=15→baza 0%, VIX=20→1.8%, VIX=30→9% scalat cu agresivitatea
+          const baseSkew  = Math.max(0, (vixVal - 15) * 0.006);
+          const skewAdj   = Math.min(2.0, Math.max(0.4, sigmaVsMarket * 0.75));
+          const skewEst   = baseSkew * skewAdj;
+
           ivData = {
             ivAnnual: ivEstAnnual, ivDaily: ivEstDaily,
             atmStrike: null, daysToExp: 30,

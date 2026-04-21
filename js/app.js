@@ -281,15 +281,48 @@ function exportWatchlistHTML() {
   const list = loadWatchlist();
   if (!list.length) { alert('Lista e goala!'); return; }
 
-  const rows = list.map(e => `
+  // CSS comun pentru toate fisierele exportate
+  const CSS = `
+  * { box-sizing: border-box; }
+  body { font-family:'Segoe UI',sans-serif; background:#0d0d1a; color:#e0e0e0;
+         padding:32px; max-width:980px; margin:auto; }
+  h1   { font-size:22px; color:#4fc3f7; margin-bottom:4px; }
+  .meta{ font-size:11px; color:rgba(255,255,255,0.35); margin-bottom:28px; }
+  .card{ background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1);
+         border-radius:10px; padding:20px 24px; margin-bottom:18px; }
+  .card-header{ display:flex; justify-content:space-between; align-items:flex-start;
+                flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+  .ticker{ font-size:22px; font-weight:700; color:#e0e0e0; margin-right:10px; }
+  .name  { font-size:13px; color:rgba(255,255,255,0.45); margin-right:10px; }
+  .price { font-size:22px; font-weight:700; color:#4fc3f7; }
+  .date  { font-size:15px; font-weight:600; color:rgba(255,255,255,0.55);
+           white-space:nowrap; text-align:right; }
+  .time  { font-size:12px; color:rgba(255,255,255,0.30); display:block; margin-top:2px; }
+  .pills { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
+  .pill  { font-size:10.5px; padding:2px 9px; border-radius:12px;
+           border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.65); }
+  .comment{ font-size:11px; color:rgba(255,255,255,0.42); line-height:1.65; margin-bottom:12px; }
+  .charts-grid{ margin-top:14px; }
+  .chart-period{ margin-bottom:14px; }
+  .period-label{ font-size:10px; font-weight:600; color:rgba(255,255,255,0.35);
+                 letter-spacing:0.5px; text-transform:uppercase; margin-bottom:5px; }
+  .chart-row{ display:flex; gap:8px; }
+  .chart-row img{ width:49%; border-radius:6px; display:block; }`;
+
+  // Genereaza si descarca un fisier HTML per entry
+  list.forEach((e, i) => {
+    const card = `
     <div class="card">
       <div class="card-header">
         <div>
           <span class="ticker">${e.ticker}</span>
-          <span class="name">${e.name}</span>
+          <span class="name">${e.name}</span><br>
           <span class="price">${e.currency} ${e.price}</span>
         </div>
-        <span class="date">${e.date}${e.time ? ' · ' + e.time : ''}</span>
+        <div style="text-align:right;">
+          <span class="date">${e.date}</span>
+          ${e.time ? `<span class="time">${e.time}</span>` : ''}
+        </div>
       </div>
       <div class="pills">${e.pills.map(p => `<span class="pill">${p}</span>`).join('')}</div>
       ${e.comment ? `<div class="comment">${e.comment.replace(/<[^>]+>/g, ' ').replace(/\s+/g,' ').trim()}</div>` : ''}
@@ -306,48 +339,27 @@ function exportWatchlistHTML() {
           `).join('')}
         </div>
       ` : ''}
-    </div>
-  `).join('');
+    </div>`;
 
-  const html = `<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="ro"><head><meta charset="UTF-8">
-<title>Vandute de urmarit — MC.Stocks</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family:'Segoe UI',sans-serif; background:#0d0d1a; color:#e0e0e0;
-         padding:32px; max-width:980px; margin:auto; }
-  h1   { font-size:22px; color:#4fc3f7; margin-bottom:5px; }
-  .meta{ font-size:11px; color:rgba(255,255,255,0.35); margin-bottom:28px; }
-  .card{ background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1);
-         border-radius:10px; padding:18px 20px; margin-bottom:18px; }
-  .card-header{ display:flex; justify-content:space-between; align-items:flex-start;
-                flex-wrap:wrap; gap:8px; margin-bottom:10px; }
-  .ticker{ font-size:18px; font-weight:700; color:#e0e0e0; margin-right:10px; }
-  .name  { font-size:12px; color:rgba(255,255,255,0.45); margin-right:10px; }
-  .price { font-size:14px; font-weight:600; color:#4fc3f7; }
-  .date  { font-size:10px; color:rgba(255,255,255,0.28); white-space:nowrap; }
-  .pills { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
-  .pill  { font-size:10.5px; padding:2px 9px; border-radius:12px;
-           border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.65); }
-  .comment{ font-size:11px; color:rgba(255,255,255,0.42); line-height:1.65; margin-bottom:12px; }
-  .charts-grid{ margin-top:12px; }
-  .chart-period{ margin-bottom:12px; }
-  .period-label{ font-size:10px; font-weight:600; color:rgba(255,255,255,0.35);
-                 letter-spacing:0.5px; text-transform:uppercase; margin-bottom:5px; }
-  .chart-row{ display:flex; gap:8px; }
-  .chart-row img{ width:49%; border-radius:6px; display:block; }
-</style></head><body>
-<h1>📌 Vandute de urmărit</h1>
-<div class="meta">Generat cu MC.Stocks · ${new Date().toLocaleDateString('ro-RO', {day:'2-digit',month:'long',year:'numeric'})}</div>
-${rows}
+<title>${e.ticker} — urmărit · MC.Stocks</title>
+<style>${CSS}</style></head><body>
+<h1>📌 ${e.ticker}</h1>
+<div class="meta">${e.name} · Salvat ${e.date}${e.time ? ' ' + e.time : ''} · MC.Stocks</div>
+${card}
 </body></html>`;
 
-  const blob = new Blob([html], { type:'text/html' });
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  a.download = 'vandute-de-urmarit.html';
-  a.click();
-  URL.revokeObjectURL(a.href);
+    // Decaleaza fiecare download ca browserul sa nu le blocheze
+    setTimeout(() => {
+      const blob = new Blob([html], { type: 'text/html' });
+      const a    = document.createElement('a');
+      a.href     = URL.createObjectURL(blob);
+      a.download = `${e.ticker}-urmarit.html`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, i * 300);
+  });
 }
 
 // ── Yahoo Finance via CORS proxy ─────────────────────

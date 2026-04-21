@@ -149,7 +149,7 @@
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V24.6</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V18.4</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -203,9 +203,22 @@
           <div id="stock-name" class="stock-name">—</div>
           <div id="stock-ticker" class="stock-ticker">—</div>
           <div id="sector-badge"></div>
+          <div style="margin-top:6px; font-size:11px; color:rgba(255,255,255,0.35); letter-spacing:0.3px; line-height:1.5;">
+            Simulare Monte Carlo · 30 000 scenarii · GBM + GARCH(1,1) + Student-t · Sentiment AI
+          </div>
+          <div id="quality-comment" style="display:none; margin-top:10px; padding:9px 13px;
+               border-radius:8px; border:1px solid rgba(255,255,255,0.08);
+               background:rgba(255,255,255,0.03); font-size:11.5px; line-height:1.65;
+               color:rgba(255,255,255,0.60); max-width:560px;"></div>
         </div>
 
         <div class="info-pills">
+          <div style="width:100%; margin-bottom:4px; font-size:10.5px; color:rgba(255,255,255,0.30);
+                      letter-spacing:0.5px; text-transform:uppercase; font-weight:600;">
+            Parametrii simularii &nbsp;·&nbsp; hover pe
+            <i class="tip-icon" style="pointer-events:none; vertical-align:middle;">i</i>
+            pentru detalii
+          </div>
 
           <!-- SIGMA STATICA -->
           <div class="pill" id="pill-sigma">

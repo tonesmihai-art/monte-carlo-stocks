@@ -297,13 +297,20 @@ function renderWatchlist() {
   cards.innerHTML = list.map((e, idx) => {
     const hasCharts = e.charts && Object.keys(e.charts).some(k => e.charts[k]);
     return `
-    <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
-         border-radius:10px;padding:14px 16px;">
+    <div data-idx="${idx}" draggable="true"
+         style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
+                border-radius:10px;padding:14px 16px;
+                transition:opacity 0.15s,border-color 0.15s;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
-        <div>
-          <span style="font-size:16px;font-weight:700;color:#e0e0e0;">${e.ticker}</span>
-          <span style="font-size:12px;color:rgba(255,255,255,0.45);margin-left:8px;">${e.name}</span>
-          <span style="font-size:13px;color:#4fc3f7;margin-left:8px;font-weight:600;">${e.currency} ${e.price}</span>
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <span title="Trage pentru a reordona"
+                style="font-size:18px;color:rgba(255,255,255,0.18);cursor:grab;
+                       user-select:none;flex-shrink:0;line-height:1.4;padding-top:1px;">⠿</span>
+          <div>
+            <span style="font-size:16px;font-weight:700;color:#e0e0e0;">${e.ticker}</span>
+            <span style="font-size:12px;color:rgba(255,255,255,0.45);margin-left:8px;">${e.name}</span>
+            <span style="font-size:13px;color:#4fc3f7;margin-left:8px;font-weight:600;">${e.currency} ${e.price}</span>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <span style="font-size:10px;color:rgba(255,255,255,0.30);">${e.date}${e.time ? ' ' + e.time : ''}</span>
@@ -321,6 +328,48 @@ function renderWatchlist() {
       ${e.comment ? `<div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.45);line-height:1.55;">${e.comment}</div>` : ''}
     </div>
   `; }).join('');
+
+  // ── Drag-and-drop reordering ──────────────────────────
+  let dragSrc = null;
+
+  Array.from(cards.children).forEach(card => {
+    card.addEventListener('dragstart', ev => {
+      dragSrc = card;
+      ev.dataTransfer.effectAllowed = 'move';
+      // Mic delay ca browser-ul sa faca snapshot inainte de opacity change
+      setTimeout(() => { card.style.opacity = '0.35'; }, 0);
+    });
+
+    card.addEventListener('dragend', () => {
+      dragSrc = null;
+      Array.from(cards.children).forEach(c => {
+        c.style.opacity     = '';
+        c.style.borderColor = '';
+      });
+    });
+
+    card.addEventListener('dragover', ev => {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      if (card !== dragSrc) card.style.borderColor = 'rgba(79,195,247,0.55)';
+    });
+
+    card.addEventListener('dragleave', () => {
+      card.style.borderColor = '';
+    });
+
+    card.addEventListener('drop', ev => {
+      ev.preventDefault();
+      if (!dragSrc || dragSrc === card) return;
+      const from = parseInt(dragSrc.dataset.idx);
+      const to   = parseInt(card.dataset.idx);
+      const lst  = loadWatchlist();
+      const [moved] = lst.splice(from, 1);
+      lst.splice(to, 0, moved);
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(lst));
+      renderWatchlist();
+    });
+  });
 }
 
 window.removeWatchlistEntry = function(idx) {

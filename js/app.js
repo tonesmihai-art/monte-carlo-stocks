@@ -1184,47 +1184,110 @@ window.toggleValuare = function() {
 };
 
 // ── Fetch date fundamentale din Yahoo Finance ─────────
+// Incearca mai multe endpoint-uri si proxy-uri pana gaseste date
+
+async function _yFetch(url, timeoutMs = 7000) {
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      signal:  ctrl.signal,
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 async function fetchValuationFundamentals(ticker) {
-  const modules = 'financialData,defaultKeyStatistics,balanceSheetHistory,cashflowStatementHistory';
-  const url     = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`;
-  const proxy   = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-
-  const r    = await fetch(proxy, { headers: { 'Accept': 'application/json' } });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const data = await r.json();
-  const res  = data?.quoteSummary?.result?.[0];
-  if (!res) throw new Error('Fara date fundamentale');
-
-  const fd  = res.financialData         || {};
-  const ks  = res.defaultKeyStatistics  || {};
-  const bs  = res.balanceSheetHistory?.balanceSheetStatements?.[0] || {};
-  const cf  = res.cashflowStatementHistory?.cashflowStatements?.[0] || {};
+  const PROXIES = [
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  ];
 
   const raw = v => (v?.raw != null ? v.raw : null);
 
-  // EPS trailing ($/acțiune)
-  const eps = raw(ks.trailingEps);
+  // ── Strategia 1: quoteSummary (financialData + keyStats + balanceSheet) ──
+  const MODULES = 'financialData,defaultKeyStatistics,balanceSheetHistory';
+  const SUMMARY_URLS = [
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}&corsDomain=finance.yahoo.com`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${MODULES}`,
+    `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${MODULES}`,
+    `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${MODULES}`,
+  ];
 
-  // Acțiuni în circulație → milioane
-  const sharesRaw = raw(ks.sharesOutstanding);
+  let summaryResult = null;
+  outer1: for (const url of SUMMARY_URLS) {
+    for (const px of PROXIES) {
+      try {
+        const json = await _yFetch(px(url));
+        const r    = json?.quoteSummary?.result?.[0];
+        if (r && (r.financialData || r.defaultKeyStatistics)) { summaryResult = r; break outer1; }
+      } catch (_) { /* incearca urmatorul */ }
+    }
+  }
+
+  // ── Strategia 2: v7/quote (fallback pentru EPS + acțiuni) ──
+  let quoteResult = null;
+  const QUOTE_FIELDS = 'epsTrailingTwelveMonths,trailingEps,sharesOutstanding,freeCashflow,totalCash,totalDebt,earningsGrowth,revenueGrowth,bookValue,priceToBook';
+  const QUOTE_URLS = [
+    `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&fields=${QUOTE_FIELDS}`,
+    `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&fields=${QUOTE_FIELDS}`,
+  ];
+
+  outer2: for (const url of QUOTE_URLS) {
+    for (const px of PROXIES) {
+      try {
+        const json = await _yFetch(px(url));
+        const q    = json?.quoteResponse?.result?.[0];
+        if (q) { quoteResult = q; break outer2; }
+      } catch (_) { /* incearca urmatorul */ }
+    }
+  }
+
+  if (!summaryResult && !quoteResult) throw new Error('Date indisponibile');
+
+  // ── Extrage valorile din ce am gasit ──
+  const fd = summaryResult?.financialData        || {};
+  const ks = summaryResult?.defaultKeyStatistics || {};
+  const bs = summaryResult?.balanceSheetHistory?.balanceSheetStatements?.[0] || {};
+  const q  = quoteResult || {};
+
+  // EPS — din quoteSummary sau v7/quote
+  const eps = raw(ks.trailingEps)
+           ?? q.epsTrailingTwelveMonths
+           ?? q.trailingEps
+           ?? null;
+
+  // Acțiuni în milioane
+  const sharesRaw = raw(ks.sharesOutstanding) ?? q.sharesOutstanding ?? null;
   const shares    = sharesRaw != null ? sharesRaw / 1e6 : null;
 
   // FCF total → per acțiune
-  const fcfTotal    = raw(fd.freeCashflow) ?? raw(cf.freeCashflow);
+  const fcfTotal    = raw(fd.freeCashflow) ?? (q.freeCashflow ?? null);
   const fcfPerShare = (fcfTotal != null && sharesRaw > 0) ? fcfTotal / sharesRaw : null;
 
-  // Bilanț ($M)
-  const totalAssets = raw(bs.totalAssets) != null ? raw(bs.totalAssets) / 1e6 : null;
-  const cashRaw     = raw(fd.totalCash) ?? raw(bs.cash);
-  const cashM       = cashRaw != null ? cashRaw / 1e6 : null;
-  const debtRaw     = raw(fd.totalDebt);
-  const debtM       = debtRaw != null ? debtRaw / 1e6 : null;
+  // Cash ($M)
+  const cashRaw = raw(fd.totalCash) ?? raw(bs.cash) ?? q.totalCash ?? null;
+  const cashM   = cashRaw != null ? cashRaw / 1e6 : null;
 
-  // Creștere estimată (%)
-  const growthRaw = raw(fd.earningsGrowth) ?? raw(fd.revenueGrowth);
+  // Datorii ($M)
+  const debtRaw = raw(fd.totalDebt) ?? q.totalDebt ?? null;
+  const debtM   = debtRaw != null ? debtRaw / 1e6 : null;
+
+  // Active totale ($M)
+  const assetsRaw = raw(bs.totalAssets) ?? null;
+  const assetsM   = assetsRaw != null ? assetsRaw / 1e6 : null;
+
+  // Creștere FCF / earnings (%)
+  const growthRaw = raw(fd.earningsGrowth) ?? raw(fd.revenueGrowth)
+                 ?? q.earningsGrowth       ?? q.revenueGrowth ?? null;
   const growth    = growthRaw != null ? growthRaw * 100 : null;
 
-  return { eps, fcfPerShare, shares, totalAssets, cash: cashM, debt: debtM, growth };
+  return { eps, fcfPerShare, shares, totalAssets: assetsM, cash: cashM, debt: debtM, growth };
 }
 
 function setValInput(id, value, decimals = 2) {

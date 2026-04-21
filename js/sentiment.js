@@ -246,7 +246,7 @@ const TICKER_SECTOR_MAP = {
    // Franta (.PA)
   'TTE.PA': { sector: 'Energy',                 industry: 'Oil & Gas Integrated' },
   'ENX.PA': { sector: 'Financial Services',     industry: 'Banks — Regional' },
-
+  'COV.PA': { sector: 'Real Estate',            industry: 'REIT — Specialty' },
   
 };
 

@@ -307,6 +307,74 @@ function blendSigma(sigmaHist, ivDaily, days) {
   return ivWeight * ivDaily + (1 - ivWeight) * sigmaHist;
 }
 
+// ── Comentariu calitativ bazat pe toti coeficientii ──
+function generateQualityComment({ sigma, volAnualPct, nu, garch, drift, deviationPct, volumeTrend, ivData, ivEstimated }) {
+  const parts = [];
+
+  // ── 1. Profil de risc ────────────────────────────────
+  const riskLabel = volAnualPct < 15 ? 'foarte scazut'
+                  : volAnualPct < 25 ? 'scazut'
+                  : volAnualPct < 40 ? 'mediu'
+                  : volAnualPct < 65 ? 'ridicat'
+                  :                    'speculativ';
+  const tailNote  = nu < 5  ? ', cozi f. groase — crash-uri posibile'
+                  : nu < 8  ? ', cozi groase — risc de socuri extreme'
+                  : nu < 15 ? ', cozi moderate'
+                  :            '';
+  const riskColor = volAnualPct < 25 ? '#66bb6a' : volAnualPct < 45 ? '#ffee58' : '#ef5350';
+  parts.push(`<span style="color:${riskColor};font-weight:600;">Risc ${riskLabel}</span> · Vol ${volAnualPct.toFixed(0)}%/an${tailNote}.`);
+
+  // ── 2. Regim GARCH ───────────────────────────────────
+  if (garch) {
+    const ratio    = garch.sigma0 / garch.sigmaLR;
+    const regime   = ratio < 0.80 ? 'Piata calma — volatilitate sub medie istorica'
+                   : ratio < 1.10 ? 'Volatilitate in regim normal'
+                   : ratio < 1.40 ? 'Piata agitata — volatilitate peste medie'
+                   :                'Regim de stres — volatilitate ridicata';
+    const persNote = garch.persistence > 0.95 ? ', clustere de risc persistente (reversia e lenta)'
+                   : garch.persistence > 0.90 ? ', volatilitate moderat persistenta'
+                   : '';
+    parts.push(`${regime}${persNote}.`);
+  }
+
+  // ── 3. Trend pret + volum ────────────────────────────
+  const driftStr = drift > 0.0003  ? 'drift pozitiv puternic'
+                 : drift > 0.0001  ? 'drift pozitiv'
+                 : drift < -0.0003 ? 'drift negativ puternic'
+                 : drift < -0.0001 ? 'drift negativ'
+                 :                   'drift neutru';
+  const maStr    = deviationPct > 12  ? `pret cu ${deviationPct.toFixed(0)}% peste MA60`
+                 : deviationPct < -12 ? `pret cu ${Math.abs(deviationPct).toFixed(0)}% sub MA60`
+                 :                      'pret aproape de MA60';
+  const vtDetail = volumeTrend?.detail ?? '';
+  const vtStr    = vtDetail === 'bullish'            ? ', volum confirma cresterea'
+                 : vtDetail === 'bearish'            ? ', volum confirma scaderea'
+                 : vtDetail.includes('bullish')      ? ', divergenta bullish la volum'
+                 : vtDetail.includes('bearish')      ? ', divergenta bearish la volum'
+                 :                                     '';
+  parts.push(`Tendinta: ${driftStr}, ${maStr}${vtStr}.`);
+
+  // ── 4. Semnalul optiunilor / IV ──────────────────────
+  if (ivData) {
+    const ivRatio  = ivData.ivDaily / sigma;
+    const ivStr    = ivRatio < 0.85 ? 'Piata nu anticipeaza miscari majore (IV redus)'
+                   : ivRatio < 1.20 ? 'Risc anticipat in linie cu trecutul'
+                   : ivRatio < 1.60 ? 'Piata pretinde miscare importanta (IV ridicat)'
+                   :                  'Tensiune maxima — eveniment major posibil';
+    const skew     = ivData.skewData?.skew;
+    const skewStr  = skew == null     ? ''
+                   : skew > 0.15      ? ', put-uri scumpe — teama puternica de scadere'
+                   : skew > 0.07      ? ', skew normal bearish'
+                   : skew < 0         ? ', call-uri mai scumpe — sentiment bullish in optiuni'
+                   :                    ', skew echilibrat';
+    const estStr   = ivEstimated ? ' <span style="opacity:0.5">(estimat din VIX)</span>' : '';
+    parts.push(`${ivStr}${skewStr}${estStr}.`);
+  }
+
+  return parts.join('<br>');
+}
+
+
 function setStatus(msg, type = 'info') {
   const el = $('status');
   el.textContent   = msg;
@@ -637,6 +705,17 @@ async function runSimulation() {
     } else {
       setPillColor('pill-skew', 'gray');
       $('info-skew').textContent = 'N/A';
+    }
+
+    // ── Comentariu calitativ ─────────────────────────────
+    const qComment = generateQualityComment({
+      sigma, volAnualPct, nu, garch, drift, deviationPct, volumeTrend,
+      ivData, ivEstimated,
+    });
+    const qEl = $('quality-comment');
+    if (qEl) {
+      qEl.innerHTML  = qComment;
+      qEl.style.display = 'block';
     }
 
     // Raport de ajustare pentru sigmaAdj (calculat mai tarziu, dupa sentiment)

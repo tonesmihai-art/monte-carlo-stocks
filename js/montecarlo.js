@@ -1,17 +1,82 @@
 // ─────────────────────────────────────────────────────
-//  MONTE CARLO — Geometric Brownian Motion in JavaScript
-//  pret_nou = pret_vechi * exp(drift + sigma * Z)
+//  MONTE CARLO — Geometric Brownian Motion + GARCH(1,1)
+//  pret_nou = pret_vechi * exp(drift + sigma_t * Z)
+//  sigma_t variaza in timp: GARCH(1,1)
 //  + Mean Reversion (Ornstein-Uhlenbeck) pe 50 de zile
 // ─────────────────────────────────────────────────────
 
 const NUM_SIMS = 30_000;
 
-// Box-Muller: generam numere aleatoare cu distributie normala
+// Box-Muller: numere aleatoare cu distributie normala
 function randNormal() {
   let u, v;
   do { u = Math.random(); } while (u === 0);
   do { v = Math.random(); } while (v === 0);
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// ── GARCH(1,1) — estimare parametri din date istorice ──
+//
+//  Modelul: σ²(t) = ω + α·ε²(t-1) + β·σ²(t-1)
+//  unde ε(t) = σ(t)·Z(t) este socul de la pasul anterior
+//
+//  α (alpha) — cat de mult influenteaza un soc recent volatilitatea
+//  β (beta)  — cat de persistenta e volatilitatea (memory)
+//  ω (omega) — ancora spre varianta pe termen lung
+//  α + β < 1 garanteaza stabilitatea modelului
+//
+export function estimateGARCH(logReturns) {
+  const n = logReturns.length;
+  if (n < 50) return null; // date insuficiente
+
+  const mean = logReturns.reduce((a, b) => a + b, 0) / n;
+  const res  = logReturns.map(r => r - mean);
+  const res2 = res.map(r => r * r); // randamente patrate
+
+  // Varianta pe termen lung (unconditional variance)
+  const varLR = res2.reduce((a, b) => a + b, 0) / n;
+
+  // Autocorelatia randamentelor patrate la lag 1
+  // Teoretic: ρ₁ ≈ α + β pentru GARCH(1,1)
+  const meanR2 = varLR;
+  let cov1 = 0;
+  let var2  = 0;
+  for (let i = 1; i < n; i++) {
+    cov1 += (res2[i] - meanR2) * (res2[i - 1] - meanR2);
+    var2 += (res2[i] - meanR2) ** 2;
+  }
+  cov1 /= (n - 1);
+  var2 /= n;
+  const rho1 = var2 > 1e-20 ? cov1 / Math.sqrt(var2 * var2) : 0.85;
+
+  // Persistenta (α+β): clampata la intervalul realist [0.70, 0.98]
+  const persistence = Math.max(0.70, Math.min(0.98, Math.abs(rho1)));
+
+  // Impartim persistenta intre α si β
+  // α tipic 0.05-0.15 pentru actiuni; β = persistenta - α
+  const alpha = Math.max(0.04, Math.min(0.15, (1 - persistence) * 0.65));
+  const beta  = Math.max(0.55, persistence - alpha);
+
+  // ω ancorat la varianta pe termen lung
+  const omega = Math.max(varLR * (1 - alpha - beta), 1e-12);
+
+  // Filtram GARCH pe ultimele 60 de zile pentru a obtine σ² initial realist
+  // (capteaza daca suntem intr-un regim de volatilitate ridicata sau calma)
+  let varCurrent = varLR;
+  const startIdx = Math.max(1, n - 60);
+  for (let i = startIdx; i < n; i++) {
+    varCurrent = omega + alpha * res[i - 1] * res[i - 1] + beta * varCurrent;
+  }
+  varCurrent = Math.max(varCurrent, omega / (1 - beta)); // floor rezonabil
+
+  return {
+    alpha:       +alpha.toFixed(5),
+    beta:        +beta.toFixed(5),
+    omega,
+    sigma0:      Math.sqrt(varCurrent),      // volatilitatea CONDITIONATA actuala
+    sigmaLR:     Math.sqrt(varLR),           // volatilitatea pe termen lung
+    persistence: +(alpha + beta).toFixed(4), // cat de "lipicioasa" e volatilitatea
+  };
 }
 
 // Calculeaza drift, sigma si media pe 50 de zile din preturile istorice
@@ -28,63 +93,52 @@ export function calcParams(closes, volumes = []) {
   const sigma    = Math.sqrt(variance);
   const drift    = mean - variance / 2;
 
-  // Media preturilor pe ultimele 30 de zile de tranzactionare
-  const last50   = closes.slice(-50);
-  const mean50   = last50.reduce((a, b) => a + b, 0) / last50.length; // redenumit intern dar compatibil cu restul codului
+  // Media preturilor pe ultimele 50 de zile
+  const last50       = closes.slice(-50);
+  const mean50       = last50.reduce((a, b) => a + b, 0) / last50.length;
+  const currentPrice = closes[closes.length - 1];
+  const deviationPct = ((currentPrice - mean50) / mean50) * 100;
 
-  // Cat de departe e pretul curent fata de media pe 30 zile (%)
-  const currentPrice   = closes[closes.length - 1];
-  const deviationPct   = ((currentPrice - mean50) / mean50) * 100;
-
-  // Volume Trend — ultimele 10 zile vs media pe 50 de zile
-  // Compara directia pretului cu directia volumului
+  // Volume Trend
   const volumeTrend = calcVolumeTrend(closes, volumes);
 
-  return { drift, sigma, mean, variance, mean50, deviationPct, volumeTrend };
+  // Estimare GARCH(1,1) din randamentele istorice
+  const garch = estimateGARCH(logReturns);
+
+  return { drift, sigma, mean, variance, mean50, deviationPct, volumeTrend, garch };
 }
 
-
 // Calculeaza trendul de volum pe ultimele 10 zile
-// Returneaza un scor si un label descriptiv
 function calcVolumeTrend(closes, volumes) {
   if (!volumes || volumes.length < 20) {
     return { score: 0, label: 'N/A', detail: 'date insuficiente' };
   }
-
-  const n     = Math.min(10, closes.length - 1);
-  const vols  = volumes.filter(v => v != null && v > 0);
+  const n    = Math.min(10, closes.length - 1);
+  const vols = volumes.filter(v => v != null && v > 0);
   if (vols.length < 20) return { score: 0, label: 'N/A', detail: 'volum indisponibil' };
 
-  const recentVols = vols.slice(-n);
-  const avgVol30   = vols.slice(-30).reduce((a, b) => a + b, 0) / Math.min(30, vols.length);
+  const recentVols   = vols.slice(-n);
+  const avgVol30     = vols.slice(-30).reduce((a, b) => a + b, 0) / Math.min(30, vols.length);
+  const recentCloses = closes.slice(-n);
+  const priceUp      = recentCloses[recentCloses.length - 1] > recentCloses[0];
+  const avgRecentVol = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
+  const volRatio     = avgRecentVol / avgVol30;
 
-  // Directia pretului in ultimele 10 zile
-  const recentCloses  = closes.slice(-n);
-  const priceUp       = recentCloses[recentCloses.length - 1] > recentCloses[0];
-  const avgRecentVol  = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
-  const volRatio      = avgRecentVol / avgVol30; // >1 = volum crescut, <1 = volum scazut
-
-  let score = 0;
-  let label = '';
-  let detail = '';
+  let score = 0, label = '', detail = '';
 
   if (priceUp && volRatio > 1.1) {
-    // Pret sus + volum sus = trend bullish confirmat
     score  = Math.min(0.3, (volRatio - 1) * 0.5);
     label  = `📈 Trend confirmat (+${((volRatio-1)*100).toFixed(0)}% vol)`;
     detail = 'bullish';
   } else if (priceUp && volRatio < 0.9) {
-    // Pret sus + volum jos = trend slab, posibila inversare
     score  = -Math.min(0.15, (1 - volRatio) * 0.3);
     label  = `⚠️ Trend slab (vol -${((1-volRatio)*100).toFixed(0)}%)`;
     detail = 'divergenta bearish';
   } else if (!priceUp && volRatio > 1.1) {
-    // Pret jos + volum sus = vanzare confirmata
     score  = -Math.min(0.3, (volRatio - 1) * 0.5);
     label  = `📉 Vanzare confirmata (+${((volRatio-1)*100).toFixed(0)}% vol)`;
     detail = 'bearish';
   } else if (!priceUp && volRatio < 0.9) {
-    // Pret jos + volum jos = corectie slaba, posibila revenire
     score  = Math.min(0.1, (1 - volRatio) * 0.2);
     label  = `🔄 Corectie slaba (vol -${((1-volRatio)*100).toFixed(0)}%)`;
     detail = 'divergenta bullish';
@@ -93,45 +147,98 @@ function calcVolumeTrend(closes, volumes) {
     label  = '➡️ Neutral';
     detail = 'neutru';
   }
-
   return { score: +score.toFixed(3), label, detail, volRatio: +volRatio.toFixed(2) };
 }
 
-// ── Simulare GBM cu Mean Reversion optional ───────────
-// meanRevStrength: 0 = dezactivat, 0.05-0.15 = realist pentru actiuni
-// mean50: tinta de revenire (media pe 50 zile)
+// ── Simulare GBM + GARCH(1,1) + Mean Reversion ────────
+//
+//  Fiecare simulare are propria sa volatilitate σ_t care evolueaza
+//  conform GARCH(1,1) — socurile mari din trecut cresc volatilitatea
+//  urmatoare, iar efectul dispare treptat cu ritmul β.
+//
+//  Daca garchParams = null, revenim la sigma constanta (GBM clasic).
+//
 export function simulate(currentPrice, drift, sigma, days,
-                          driftAdj = null, sigmaAdj = null,
-                          meanRevStrength = 0, mean50 = null) {
+                          driftAdj    = null,
+                          sigmaAdj    = null,
+                          meanRevStrength = 0,
+                          mean50      = null,
+                          garchParams = null) {
+
   const d      = driftAdj ?? drift;
-  const s      = sigmaAdj ?? sigma;
-  const target = mean50 ?? currentPrice; // daca nu avem mean50, nu revenim nicaieri
+  const sBase  = sigmaAdj ?? sigma;
+  const target = mean50 ?? currentPrice;
   const matrix = new Float64Array((days + 1) * NUM_SIMS);
 
-  for (let sim = 0; sim < NUM_SIMS; sim++) {
-    matrix[sim] = currentPrice;
-  }
+  // Pretul initial identic pentru toate simulatiile
+  for (let sim = 0; sim < NUM_SIMS; sim++) matrix[sim] = currentPrice;
 
-  for (let day = 1; day <= days; day++) {
-    const offset     = day * NUM_SIMS;
-    const prevOffset = (day - 1) * NUM_SIMS;
-    for (let sim = 0; sim < NUM_SIMS; sim++) {
-      const prevPrice = matrix[prevOffset + sim];
-      const z         = randNormal();
+  if (garchParams) {
+    // ── Simulare cu GARCH(1,1) ──────────────────────────
+    //  σ²_t = ω + α·ε²_(t-1) + β·σ²_(t-1)
+    //
+    //  Fiecare simulare porneste cu aceeasi sigma0 (volatilitatea
+    //  conditionata estimata din ultimele 60 de zile de date reale),
+    //  dar evolueaza independent dupa socurile proprii.
 
-      // Mean reversion: trage pretul spre mean50
-      // Cu cat pretul e mai departe de medie, cu atat pull-ul e mai puternic
-      const reversionPull = meanRevStrength > 0 && target > 0
-        ? meanRevStrength * Math.log(target / prevPrice)
-        : 0;
+    const { alpha, beta, omega, sigma0 } = garchParams;
 
-      matrix[offset + sim] = prevPrice * Math.exp(d + reversionPull + s * z);
+    // Scalare: daca s-a aplicat ajustare AI de sigma, scalez sigma0 proportional
+    const scale  = sBase / (garchParams.sigmaLR || sBase || 1);
+    const s0     = sigma0 * scale;
+    const omegaS = omega * scale * scale; // omega scalat consistent
+
+    // Vectori de stare per simulare (doar ziua curenta — economie de memorie)
+    const varT   = new Float64Array(NUM_SIMS).fill(s0 * s0);
+    const epsT   = new Float64Array(NUM_SIMS); // soc anterior (initial 0)
+
+    for (let day = 1; day <= days; day++) {
+      const offset     = day * NUM_SIMS;
+      const prevOffset = (day - 1) * NUM_SIMS;
+
+      for (let sim = 0; sim < NUM_SIMS; sim++) {
+        const prevPrice = matrix[prevOffset + sim];
+
+        // Actualizeaza varianta GARCH cu socul zilei anterioare
+        varT[sim] = omegaS + alpha * epsT[sim] * epsT[sim] + beta * varT[sim];
+        // Clamp: evita variante negative sau explozive
+        varT[sim] = Math.max(varT[sim], omegaS);
+        varT[sim] = Math.min(varT[sim], sBase * sBase * 25); // max 5× sigma initiala
+
+        const sigmaT = Math.sqrt(varT[sim]);
+        const z      = randNormal();
+        const eps    = sigmaT * z;
+        epsT[sim]    = eps; // salveaza pentru urmatoarea zi
+
+        // Mean reversion spre MA50
+        const revPull = meanRevStrength > 0 && target > 0
+          ? meanRevStrength * Math.log(target / prevPrice)
+          : 0;
+
+        matrix[offset + sim] = prevPrice * Math.exp(d + revPull + eps);
+      }
+    }
+
+  } else {
+    // ── Simulare clasica GBM — sigma constanta ─────────
+    for (let day = 1; day <= days; day++) {
+      const offset     = day * NUM_SIMS;
+      const prevOffset = (day - 1) * NUM_SIMS;
+      for (let sim = 0; sim < NUM_SIMS; sim++) {
+        const prevPrice = matrix[prevOffset + sim];
+        const z         = randNormal();
+        const revPull   = meanRevStrength > 0 && target > 0
+          ? meanRevStrength * Math.log(target / prevPrice)
+          : 0;
+        matrix[offset + sim] = prevPrice * Math.exp(d + revPull + sBase * z);
+      }
     }
   }
+
   return matrix;
 }
 
-// Extrage un array de preturi finale (ultima zi)
+// Extrage preturile finale (ultima zi)
 export function getFinalPrices(matrix, days) {
   const offset = days * NUM_SIMS;
   const finals = new Float64Array(NUM_SIMS);
@@ -155,9 +262,9 @@ export function calcStats(matrix, days, currentPrice) {
 
   let probProfit = 0, probGain10 = 0, probLoss10 = 0;
   for (let i = 0; i < n; i++) {
-    if (sorted[i] > currentPrice)         probProfit++;
-    if (sorted[i] > currentPrice * 1.10)  probGain10++;
-    if (sorted[i] < currentPrice * 0.90)  probLoss10++;
+    if (sorted[i] > currentPrice)        probProfit++;
+    if (sorted[i] > currentPrice * 1.10) probGain10++;
+    if (sorted[i] < currentPrice * 0.90) probLoss10++;
   }
 
   return {
@@ -194,8 +301,7 @@ export function percentilesPerDay(matrix, days, pcts = [10, 50, 90]) {
   return result;
 }
 
-// ── Ajustare parametri GBM ────────────────────────────
-// Combina: sentiment ponderat pe sector + VIX + mean reversion
+// ── Ajustare parametri GBM pe baza sentimentului ─────
 export function adjustParams(drift, sigma, sentimentScores,
                               sectorWeights = null, vixImpact = 0,
                               deviationPct = 0, volumeTrendScore = 0) {
@@ -211,7 +317,6 @@ export function adjustParams(drift, sigma, sentimentScores,
 
   let weightedSum = 0;
   let totalWeight = 0;
-
   sentimentScores.forEach((score, i) => {
     const key = FACTOR_KEYS[i];
     const w   = sectorWeights?.[key] ?? 1.0;
@@ -222,29 +327,19 @@ export function adjustParams(drift, sigma, sentimentScores,
   const avg    = totalWeight > 0 ? weightedSum / totalWeight : 0;
   const absAvg = Math.abs(avg);
 
-  // Volume trend confirma sau slabeste drift-ul
-  const driftAdj       = drift + avg * 0.0002 + volumeTrendScore * 0.0001;
-  // Volum divergent (trend slab) => creste incertitudinea
-  const volUncertainty = volumeTrendScore < 0 ? Math.abs(volumeTrendScore) * 0.15 : 0;
-  const sigmaAdj       = sigma * (1 + absAvg * 0.3 + vixImpact + volUncertainty);
+  const driftAdj        = drift + avg * 0.0002 + volumeTrendScore * 0.0001;
+  const volUncertainty  = volumeTrendScore < 0 ? Math.abs(volumeTrendScore) * 0.15 : 0;
+  const sigmaAdj        = sigma * (1 + absAvg * 0.3 + vixImpact + volUncertainty);
   const meanRevStrength = calcMeanRevStrength(deviationPct);
 
   return { driftAdj, sigmaAdj, meanRevStrength };
 }
 
-// Calculeaza forta de mean reversion in functie de deviatie fata de MA50
-// Logica: cu cat pretul e mai departe de medie, cu atat revine mai puternic
-// deviationPct > 0 = supracumparata, < 0 = suprainvatata
 function calcMeanRevStrength(deviationPct) {
   const absDev = Math.abs(deviationPct);
-
-  // Sub 5% deviere => practic fara mean reversion
   if (absDev < 5)  return 0.0;
-  // 5-15% deviere => revenire slaba
   if (absDev < 15) return 0.03;
-  // 15-30% deviere => revenire moderata
   if (absDev < 30) return 0.07;
-  // Peste 30% deviere => revenire puternica
   return 0.12;
 }
 

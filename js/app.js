@@ -89,6 +89,24 @@ async function fetchStockData(ticker) {
 }
 
 // ── UI Helpers ───────────────────────────────────────
+
+// Seteaza culoarea unui pill in functie de valori
+const PILL_COLORS = {
+  green:  'pill--green',
+  yellow: 'pill--yellow',
+  orange: 'pill--orange',
+  red:    'pill--red',
+  gray:   'pill--gray',
+  purple: 'pill--purple',
+};
+function setPillColor(pillId, color) {
+  const el = document.getElementById(pillId);
+  if (!el) return;
+  // Sterge orice clasa de culoare existenta
+  Object.values(PILL_COLORS).forEach(c => el.classList.remove(c));
+  if (color && PILL_COLORS[color]) el.classList.add(PILL_COLORS[color]);
+}
+
 function setStatus(msg, type = 'info') {
   const el = $('status');
   el.textContent   = msg;
@@ -260,26 +278,70 @@ async function runSimulation() {
     setStatus('Calculez parametri GBM + GARCH(1,1)...');
     const { drift, sigma, mean50, deviationPct, volumeTrend, garch, nu } = calcParams(closes, volumes);
 
-    // Afiseaza sigma + GARCH + ν (fat tails)
-    const nuLabel = nu >= 29 ? 'normal'
-                  : nu >= 10 ? `ν=${nu} (cozi medii)`
-                  : nu >= 5  ? `ν=${nu} (cozi groase)`
-                  :            `ν=${nu} (cozi f. groase)`;
+    // ── Afiseaza pills individuale cu culori dinamice ──
+    const sigmaStaticPct = (sigma * 100).toFixed(3);
+    const volAnualPct    = sigma * Math.sqrt(252) * 100;
 
+    // ① Sigma zilnica statica
+    const sigmaColor = sigma < 0.01 ? 'green' : sigma < 0.02 ? 'yellow' : 'red';
+    setPillColor('pill-sigma', sigmaColor);
+    $('info-sigma').textContent = `${sigmaStaticPct}%/zi`;
+
+    // ② GARCH actual
     if (garch) {
-      const sigmaGarchPct  = (garch.sigma0 * 100).toFixed(3);
-      const sigmaStaticPct = (sigma * 100).toFixed(3);
-      const regime = garch.sigma0 > garch.sigmaLR * 1.15 ? '🔴'
-                   : garch.sigma0 < garch.sigmaLR * 0.85 ? '🟢' : '🟡';
-      $('info-sigma').textContent = `${sigmaStaticPct}% → ${sigmaGarchPct}% ${regime} | ${nuLabel}`;
-      $('info-sigma').title       = `Sigma statica: ${sigmaStaticPct}%/zi | GARCH actual: ${sigmaGarchPct}%/zi | Student-t grade libertate: ν=${nu}`;
-      $('info-vol').textContent   = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}%/an | pers: ${(garch.persistence * 100).toFixed(1)}%`;
+      const sigmaGarchPct = (garch.sigma0 * 100).toFixed(3);
+      const garchRegime   = garch.sigma0 > garch.sigmaLR * 1.15 ? 'red'
+                          : garch.sigma0 < garch.sigmaLR * 0.85 ? 'green' : 'yellow';
+      const garchEmoji    = garchRegime === 'red' ? '🔴' : garchRegime === 'green' ? '🟢' : '🟡';
+      setPillColor('pill-garch', garchRegime);
+      $('info-garch').textContent = `${sigmaGarchPct}%/zi ${garchEmoji}`;
+
+      // ⑤ Persistenta GARCH
+      const persVal   = garch.persistence;
+      const persColor = persVal < 0.85 ? 'green' : persVal < 0.95 ? 'yellow' : 'red';
+      setPillColor('pill-pers', persColor);
+      $('info-pers').textContent = `${(persVal * 100).toFixed(1)}%`;
     } else {
-      $('info-sigma').textContent = `${(sigma * 100).toFixed(3)}%/zi | ${nuLabel}`;
-      $('info-vol').textContent   = `${(sigma * Math.sqrt(252) * 100).toFixed(1)}%/an`;
+      setPillColor('pill-garch', 'gray');
+      $('info-garch').textContent = 'N/A';
+      setPillColor('pill-pers', 'gray');
+      $('info-pers').textContent = 'N/A';
     }
-    $('info-drift').textContent  = `${(drift * 100).toFixed(4)}%/zi`;
-    $('info-ma50').textContent   = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
+
+    // ③ Student-t ν (fat tails)
+    const nuColor = nu < 5 ? 'red' : nu < 8 ? 'orange' : nu < 20 ? 'yellow' : 'green';
+    const nuLabel = nu >= 29 ? `ν=${nu} normal`
+                  : nu >= 10 ? `ν=${nu} medii`
+                  : nu >= 5  ? `ν=${nu} groase`
+                  :            `ν=${nu} f.groase`;
+    setPillColor('pill-nu', nuColor);
+    $('info-nu').textContent = nuLabel;
+
+    // ④ Volatilitate anuala
+    const volColor = volAnualPct < 20 ? 'green' : volAnualPct < 40 ? 'yellow' : 'red';
+    setPillColor('pill-vol', volColor);
+    $('info-vol').textContent = `${volAnualPct.toFixed(1)}%/an`;
+
+    // ⑥ Drift
+    const driftColor = drift > 0.0001 ? 'green' : drift < -0.0001 ? 'red' : 'gray';
+    setPillColor('pill-drift', driftColor);
+    $('info-drift').textContent = `${drift >= 0 ? '+' : ''}${(drift * 100).toFixed(4)}%/zi`;
+
+    // ⑦ MA60
+    const absDev  = Math.abs(deviationPct);
+    const maColor = absDev < 5 ? 'green' : absDev < 15 ? 'yellow' : 'red';
+    setPillColor('pill-ma60', maColor);
+    $('info-ma50').textContent = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
+
+    // ⑧ Vol trend
+    const vtScore  = volumeTrend?.score ?? 0;
+    const vtDetail = volumeTrend?.detail ?? '';
+    const vtColor  = vtDetail === 'bullish' ? 'green'
+                   : vtDetail === 'bearish' ? 'red'
+                   : vtDetail.includes('bullish') ? 'yellow'
+                   : vtDetail.includes('bearish') ? 'orange'
+                   : 'gray';
+    setPillColor('pill-voltren', vtColor);
     $('info-voltren').textContent = volumeTrend?.label ?? '—';
 
     // ── 3. Sector + VIX (independent, intotdeauna rulat) ─

@@ -107,6 +107,71 @@ function setPillColor(pillId, color) {
   if (color && PILL_COLORS[color]) el.classList.add(PILL_COLORS[color]);
 }
 
+// ── Volatilitate implicita din optiuni ───────────────
+// Extrage IV din contractul ATM cel mai aproape de 30 zile
+async function fetchImpliedVolatility(ticker, currentPrice) {
+  try {
+    const url   = `https://query2.finance.yahoo.com/v7/finance/options/${ticker}`;
+    const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+    const r     = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return null;
+    const data   = await r.json();
+    const result = data?.optionChain?.result?.[0];
+    if (!result) return null;
+
+    const now      = Date.now() / 1000;
+    const target30 = now + 30 * 86400;
+
+    // Cel mai apropiat de 30 de zile, minim 7 zile distanta
+    const expDates = (result.expirationDates || []).filter(d => d > now + 7 * 86400);
+    if (!expDates.length) return null;
+    const nearestExp = expDates.reduce((a, b) =>
+      Math.abs(b - target30) < Math.abs(a - target30) ? b : a
+    );
+
+    // Descarca lantul de optiuni pentru expirarea aleasa
+    const url2   = `https://query2.finance.yahoo.com/v7/finance/options/${ticker}?date=${nearestExp}`;
+    const proxy2 = `https://corsproxy.io/?${encodeURIComponent(url2)}`;
+    const r2     = await fetch(proxy2, { signal: AbortSignal.timeout(8000) });
+    if (!r2.ok) return null;
+    const data2  = await r2.json();
+    const opts   = data2?.optionChain?.result?.[0]?.options?.[0];
+    if (!opts) return null;
+
+    const calls = (opts.calls || []).filter(c => c.impliedVolatility > 0.01 && c.impliedVolatility < 5);
+    const puts  = (opts.puts  || []).filter(p => p.impliedVolatility > 0.01 && p.impliedVolatility < 5);
+    if (!calls.length && !puts.length) return null;
+
+    // Strike ATM = cel mai apropiat de pretul curent
+    const allStrikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a - b);
+    const atmStrike  = allStrikes.reduce((a, b) =>
+      Math.abs(b - currentPrice) < Math.abs(a - currentPrice) ? b : a
+    );
+
+    const atmCall = calls.find(c => c.strike === atmStrike);
+    const atmPut  = puts.find(p  => p.strike === atmStrike);
+    const ivs     = [atmCall?.impliedVolatility, atmPut?.impliedVolatility].filter(v => v > 0.01 && v < 5);
+    if (!ivs.length) return null;
+
+    const ivAnnual  = ivs.reduce((a, b) => a + b, 0) / ivs.length;
+    const ivDaily   = ivAnnual / Math.sqrt(252);
+    const daysToExp = Math.round((nearestExp - now) / 86400);
+
+    return { ivAnnual, ivDaily, atmStrike, daysToExp };
+  } catch (e) {
+    console.warn('IV fetch error:', e);
+    return null;
+  }
+}
+
+// Combina sigma istorica cu IV dupa orizontul de timp
+// IV conteaza mult pe termen scurt (30z), scade spre orizonturi lungi
+function blendSigma(sigmaHist, ivDaily, days) {
+  if (!ivDaily || ivDaily <= 0) return sigmaHist;
+  const ivWeight = Math.max(0.10, Math.min(0.70, 30 / days));
+  return ivWeight * ivDaily + (1 - ivWeight) * sigmaHist;
+}
+
 function setStatus(msg, type = 'info') {
   const el = $('status');
   el.textContent   = msg;
@@ -344,6 +409,26 @@ async function runSimulation() {
     setPillColor('pill-voltren', vtColor);
     $('info-voltren').textContent = volumeTrend?.label ?? '—';
 
+    // ── 2b. Volatilitate implicita din optiuni (IV) ──────
+    setStatus('Caut volatilitate implicita din optiuni...');
+    let ivData = null;
+    try { ivData = await fetchImpliedVolatility(ticker, currentPrice); } catch (e) { /* silent */ }
+
+    if (ivData) {
+      const ivAnnPct = (ivData.ivAnnual * 100).toFixed(1);
+      const ivRatio  = ivData.ivDaily / sigma;
+      const ivColor  = ivRatio < 0.85 ? 'green' : ivRatio < 1.20 ? 'yellow' : 'red';
+      setPillColor('pill-iv', ivColor);
+      $('info-iv').textContent = `${ivAnnPct}%/an · ${ivData.daysToExp}z`;
+    } else {
+      setPillColor('pill-iv', 'gray');
+      $('info-iv').textContent = 'N/A';
+    }
+
+    // Raport de ajustare pentru sigmaAdj (calculat mai tarziu, dupa sentiment)
+    // Stocat ca multiplicator fata de sigma istorica
+    let sigmaAdjRatio = null;
+
     // ── 3. Sector + VIX (independent, intotdeauna rulat) ─
     setStatus('Detectez sector si VIX...');
     let sectorWeights = null;
@@ -373,6 +458,8 @@ async function runSimulation() {
         driftAdj        = adj.driftAdj;
         sigmaAdj        = adj.sigmaAdj;
         meanRevStrength = adj.meanRevStrength ?? 0;
+        // Raport de ajustare sentiment/VIX fata de sigma istorica (aplicat si pe blended sigma)
+        if (sigmaAdj != null && sigma > 0) sigmaAdjRatio = sigmaAdj / sigma;
 
         $('sent-global').textContent = `${sentimentData.sentimentGlobal >= 0 ? '+' : ''}${sentimentData.sentimentGlobal.toFixed(3)}`;
         $('sent-global').style.color = sentimentData.sentimentGlobal > 0.1 ? '#66bb6a'
@@ -421,10 +508,16 @@ async function runSimulation() {
     for (const days of PERIODS) {
       setStatus(`Simulez ${days} zile (${NUM_SIMS.toLocaleString()} scenarii)...`);
       await new Promise(r => setTimeout(r, 0));
-      // GARCH + Fat Tails (Student-t ν) pasate la ambele simulari
-      const matrix    = simulate(currentPrice, drift, sigma, days, null,     null,     meanRevStrength, mean50, garch, nu);
+
+      // Sigma blended: IV (forward-looking) + istorica, ponderate dupa orizont
+      // 30z: 70% IV | 90z: 33% IV | 180z: 17% IV | 360z: 10% IV
+      const sigmaBlended    = blendSigma(sigma, ivData?.ivDaily, days);
+      // Daca avem ajustare sentiment, aplicam acelasi multiplicator pe sigma blended
+      const sigmaAdjBlended = sigmaAdjRatio != null ? sigmaBlended * sigmaAdjRatio : null;
+
+      const matrix    = simulate(currentPrice, drift, sigmaBlended, days, null,     null,          meanRevStrength, mean50, garch, nu);
       const matrixAdj = driftAdj != null
-        ? simulate(currentPrice, drift, sigma, days, driftAdj, sigmaAdj, meanRevStrength, mean50, garch, nu) : null;
+        ? simulate(currentPrice, drift, sigmaBlended, days, driftAdj, sigmaAdjBlended, meanRevStrength, mean50, garch, nu) : null;
       periodResults[days] = {
         days,
         stats:    calcStats(matrix, days, currentPrice),

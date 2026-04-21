@@ -130,13 +130,27 @@
       border-radius: 50%;
       flex-shrink: 0;
     }
+
+    /* ── Individual pill color variants ─────────────── */
+    .info-pills {
+      flex-wrap: wrap;
+    }
+    .pill {
+      transition: border-color 0.3s ease, background 0.3s ease;
+    }
+    .pill--green  { border-color: rgba(102,187,106,0.55) !important; background: rgba(102,187,106,0.08) !important; }
+    .pill--yellow { border-color: rgba(255,238,88,0.5)  !important; background: rgba(255,238,88,0.07)  !important; }
+    .pill--orange { border-color: rgba(255,167,38,0.5)  !important; background: rgba(255,167,38,0.08)  !important; }
+    .pill--red    { border-color: rgba(239,83,80,0.55)  !important; background: rgba(239,83,80,0.08)   !important; }
+    .pill--gray   { border-color: rgba(136,136,136,0.35)!important; background: rgba(136,136,136,0.05) !important; }
+    .pill--purple { border-color: rgba(206,147,216,0.5) !important; background: rgba(206,147,216,0.08) !important; }
   </style>
 </head>
 <body>
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V24.1</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V24.2</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -194,62 +208,110 @@
 
         <div class="info-pills">
 
-          <!-- SIGMA + GARCH + Student-t -->
-          <div class="pill">
+          <!-- SIGMA STATICA -->
+          <div class="pill" id="pill-sigma">
             <span class="tip-wrap">
-              Sigma:
+              σ/zi:
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
-                <strong>📊 Sigma + GARCH(1,1) + Student-t(ν)</strong>
-                <em style="color:#aaa;font-size:10px">3 modele combinate</em>
-                <div class="tip-scale" style="margin-top:5px">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#4fc3f7"></span> <b>Sigma statica</b> — media istorica a volatilitatii zilnice</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> <b>GARCH actual</b> — volatilitatea conditionata <em>acum</em> (ultimele 60 zile). 🟢 calm / 🟡 normal / 🔴 agitat</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ce93d8"></span> <b>ν (Student-t)</b> — coada distributiei: cat de des apar crashuri extreme</div>
+                <strong>📊 Sigma zilnica (statica)</strong>
+                Media volatilitatii zilnice calculate din ultimul an de tranzactionare.
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 1%/zi — calm (ETF, indici)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 1–2%/zi — normal (actiuni mari)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 2%/zi — volatil (crypto, meme)</div>
                 </div>
-                <div style="margin-top:6px;font-size:10.5px">
-                  Distributia <b>normala</b> (Gauss) subestimeaza dramatic evenimentele extreme — un crash de -5σ ar trebui sa apara o data la 14.000 ani, dar se intampla de cateva ori pe deceniu.<br><br>
-                  <b>Student-t(ν)</b> corecteaza asta: cu cat ν e mai mic, cu atat cozile sunt mai groase si crashurile mai frecvente in simulare.
-                </div>
-                <div class="tip-scale" style="margin-top:5px">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> ν = 3–4 — cozi f. groase (crypto, penny stocks)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> ν = 5–7 — cozi groase (TSLA, NVDA, actiuni volatile)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> ν = 8–15 — cozi medii (actiuni normale)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> ν &gt; 20 — practic normal (indici diversificati)</div>
-                </div>
-                <span class="tip-impact">Influenteaza: frecventa si amplitudinea evenimentelor extreme</span>
+                <span class="tip-impact">Influenteaza: dispersia scenariilor simulate</span>
               </div>
             </span>
             <span id="info-sigma">—</span>
           </div>
 
-          <!-- VOL. ANUALA + PERSISTENTA GARCH -->
-          <div class="pill">
+          <!-- GARCH ACTUAL -->
+          <div class="pill" id="pill-garch">
             <span class="tip-wrap">
-              Vol. anuala:
+              GARCH:
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
-                <strong>📅 Volatilitate anuala + Persistenta GARCH</strong>
-                Primul numar = sigma × √252. Al doilea (pers.) = α+β din GARCH — cat de "lipicioasa" e volatilitatea.
+                <strong>📈 GARCH(1,1) — Volatilitate actuala</strong>
+                Volatilitatea conditionata <em>acum</em>, estimata din ultimele 60 de zile. Reflecta regimul curent al pietei, nu media istorica.
                 <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Pers. &lt; 85% — socurile dispar repede</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> Pers. 85–95% — volatilitate persistenta</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Pers. &gt; 95% — soc dureaza saptamani</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> 🟢 sub medie — piata calma</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 🟡 aproape de medie — normal</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> 🔴 peste medie — piata agitata</div>
                 </div>
-                <span class="tip-impact">Influenteaza: viteza de revenire la vol. normala</span>
+                <span class="tip-impact">Influenteaza: volatilitatea de start in simulare</span>
+              </div>
+            </span>
+            <span id="info-garch">—</span>
+          </div>
+
+          <!-- STUDENT-t ν -->
+          <div class="pill" id="pill-nu">
+            <span class="tip-wrap">
+              Fat-t:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>📉 Distributie Student-t(ν)</strong>
+                Distributia normala subestimeaza dramatic crashurile — un -5σ ar trebui sa apara o data la 14.000 de ani, dar se intampla de cateva ori pe deceniu. Student-t corecteaza asta prin cozi mai groase.
+                <div class="tip-scale" style="margin-top:5px">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> ν = 3–4 — cozi f. groase (crypto)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> ν = 5–7 — cozi groase (TSLA, NVDA)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> ν = 8–15 — cozi medii (actiuni normale)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> ν &gt; 20 — practic normal (indici)</div>
+                </div>
+                <span class="tip-impact">Influenteaza: frecventa evenimentelor extreme</span>
+              </div>
+            </span>
+            <span id="info-nu">—</span>
+          </div>
+
+          <!-- VOL. ANUALA -->
+          <div class="pill" id="pill-vol">
+            <span class="tip-wrap">
+              Vol/an:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>📅 Volatilitate anualizata</strong>
+                Sigma zilnica × √252 — standardul din industrie pentru compararea riscului intre active.
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 20% — actiuni stabile (JNJ, KO)</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 20–40% — volatilitate medie</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 40% — very volatile (crypto, meme)</div>
+                </div>
+                <span class="tip-impact">Indicator general de risc al activului</span>
               </div>
             </span>
             <span id="info-vol">—</span>
           </div>
 
+          <!-- PERSISTENTA GARCH -->
+          <div class="pill" id="pill-pers">
+            <span class="tip-wrap">
+              Pers:
+              <i class="tip-icon">i</i>
+              <div class="tip-bubble">
+                <strong>🔄 Persistenta GARCH (α+β)</strong>
+                Cat de "lipicioasa" e volatilitatea — cat timp dureaza un soc pana se disipa. α+β aproape de 1 = socul persista saptamani.
+                <div class="tip-scale">
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 85% — socurile dispar rapid</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 85–95% — volatilitate persistenta</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 95% — soc dureaza saptamani</div>
+                </div>
+                <span class="tip-impact">Influenteaza: viteza de normalizare dupa soc</span>
+              </div>
+            </span>
+            <span id="info-pers">—</span>
+          </div>
+
           <!-- DRIFT -->
-          <div class="pill">
+          <div class="pill" id="pill-drift">
             <span class="tip-wrap">
               Drift:
               <i class="tip-icon">i</i>
               <div class="tip-bubble">
                 <strong>📈 Drift — Tendinta zilnica</strong>
-                Directia medie a pretului per zi, calculata din istoricul unui an. Drift pozitiv = trend ascendent. Influenteaza direct unde se concentreaza simularile.
+                Directia medie a pretului per zi din ultimul an. Influenteaza direct unde se concentreaza simularile.
                 <div class="tip-scale">
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &gt; 0 — tendinta de crestere</div>
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> ≈ 0 — piata laterala</div>
@@ -262,18 +324,18 @@
           </div>
 
           <!-- MA60 -->
-          <div class="pill">
+          <div class="pill" id="pill-ma60">
             <span class="tip-wrap">
               MA60:
               <i class="tip-icon">i</i>
               <div class="tip-bubble tip-left">
                 <strong>〰️ Media mobila 60 zile</strong>
-                Media pretului din ultimele 60 de zile. Procentul arata cat de departe e pretul curent fata de aceasta medie (mean reversion).
+                Cat de departe e pretul curent fata de media pe 60 de zile. Deviatia mare declanseaza mean reversion in simulare.
                 <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Pret &gt; MA → presiune de scadere</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Pret &lt; MA → presiune de crestere</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 5% — pret aproape de medie</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 5–15% — deviere moderata</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 15% — deviere semnificativa</div>
                 </div>
-                Deviatia mare fata de MA ajusteaza drift-ul in simularea AI.
                 <span class="tip-impact">Influenteaza: mean reversion in GBM</span>
               </div>
             </span>
@@ -281,16 +343,16 @@
           </div>
 
           <!-- VOL TREND -->
-          <div class="pill">
+          <div class="pill" id="pill-voltren">
             <span class="tip-wrap">
               Vol:
               <i class="tip-icon">i</i>
               <div class="tip-bubble tip-left">
                 <strong>🔊 Trend volum tranzactionare</strong>
-                Compara volumul din ultimele 10 zile cu media pe 30 de zile, corelat cu directia pretului.
+                Volumul din ultimele 10 zile vs media pe 30 de zile, corelat cu directia pretului.
                 <div class="tip-scale">
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Bullish — volum mare + pret sus</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> Neutral — fara confirmare clara</div>
+                  <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> Neutral — fara confirmare</div>
                   <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Bearish — volum mare + pret jos</div>
                 </div>
                 <span class="tip-impact">Influenteaza: ajustarea drift-ului AI</span>

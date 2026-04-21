@@ -314,11 +314,14 @@ async function runSimulation() {
                                      : sentimentData.sentimentGlobal < -0.1 ? '#ef5350' : '#ffee58';
         $('sent-conclusion').textContent = sentimentData.concluzie;
         {
-          const s = sentimentData.surse;
+          const s  = sentimentData.surse;
+          const ts = sentimentData.tierStats;
           const brut = s.yahoo + s.reuters + s.google + s.seekingAlpha + s.euronews;
           $('sent-sources').textContent =
-            `Yahoo: ${s.yahoo} | AP/CNBC: ${s.reuters} | Google: ${s.google} | Seeking Alpha: ${s.seekingAlpha} | Euronews: ${s.euronews}` +
-            ` — ${brut} brut → ${sentimentData.totalStiri} unice dupa deduplicare`;
+            `Yahoo: ${s.yahoo} | AP/CNBC: ${s.reuters} | Google: ${s.google} | SA: ${s.seekingAlpha} | EN: ${s.euronews}` +
+            `  ·  ${brut} brut → ${sentimentData.totalBrut} unice` +
+            `  ·  Filtrat: T1:${ts.t1} T2:${ts.t2} T3:${ts.t3} zgomot:${ts.t4}` +
+            `  →  ${sentimentData.totalStiri} stiri folosite in calcul`;
         }
 
         drawSentiment('sentiment-chart', sentimentData);

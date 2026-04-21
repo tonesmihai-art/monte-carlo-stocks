@@ -107,97 +107,187 @@ function setPillColor(pillId, color) {
 }
 
 // ── Volatilitate implicita din optiuni + Put/Call Skew ─
-// Extrage IV din contractul ATM cel mai aproape de 30 zile
-// si calculeaza skew-ul directional din optiunile OTM
+// Sursa primara: Nasdaq API (CORS liber, fara proxy, US stocks)
+// Fallback:      Yahoo Finance v7 prin corsproxy / allorigins
 async function fetchImpliedVolatility(ticker, currentPrice) {
-  // Incearca mai multe proxies si hosturi Yahoo pana gaseste unul care raspunde
-  async function tryFetch(path) {
-    const hosts  = ['https://query2.finance.yahoo.com', 'https://query1.finance.yahoo.com'];
-    const proxies = [
+
+  // Detecteaza daca e ticker US (fara sufix .XX sau -USD)
+  const isUS = !ticker.includes('.') && !ticker.includes('-');
+
+  // ── Helper: parse IV de la Nasdaq (format "21.53" sau "--") ──
+  function parseNasdaqIV(str) {
+    if (!str || str === '--' || str === 'N/A') return null;
+    const n = parseFloat(str.replace('%', '').replace(',', ''));
+    if (isNaN(n) || n <= 0 || n > 500) return null;
+    return n / 100; // Nasdaq da procentul intreg, ex: 21.53 => 0.2153
+  }
+  function parseStrike(str) {
+    if (!str) return null;
+    return parseFloat(str.replace('$', '').replace(',', ''));
+  }
+
+  // ── Nasdaq API (ticker US fara proxy) ────────────────
+  if (isUS) {
+    try {
+      const NBASE = 'https://api.nasdaq.com/api/quote';
+
+      // Pasul 1: lista expirari disponibile
+      const listUrls = [
+        `${NBASE}/${ticker}/option-chain?assetclass=stocks&type=all&limit=1`,
+        `https://corsproxy.io/?${encodeURIComponent(`${NBASE}/${ticker}/option-chain?assetclass=stocks&type=all&limit=1`)}`,
+      ];
+      let expiryList = null;
+      for (const u of listUrls) {
+        try {
+          const r = await fetch(u, { signal: AbortSignal.timeout(8000) });
+          if (!r.ok) continue;
+          const d = await r.json();
+          const list = d?.data?.expiryList;
+          if (list?.length) { expiryList = list; break; }
+        } catch (_) {}
+      }
+
+      if (expiryList?.length) {
+        const now      = Date.now();
+        const target30 = now + 30 * 86400000;
+        const valid    = expiryList.filter(d => new Date(d).getTime() > now + 7 * 86400000);
+
+        if (valid.length) {
+          const nearestExp = valid.reduce((a, b) =>
+            Math.abs(new Date(b) - target30) < Math.abs(new Date(a) - target30) ? b : a
+          );
+          const daysToExp = Math.round((new Date(nearestExp) - now) / 86400000);
+
+          // Pasul 2: lantul de optiuni pentru expirarea aleasa
+          const chainUrls = [
+            `${NBASE}/${ticker}/option-chain?assetclass=stocks&expirydate=${nearestExp}&type=all&money=all&limit=100`,
+            `https://corsproxy.io/?${encodeURIComponent(`${NBASE}/${ticker}/option-chain?assetclass=stocks&expirydate=${nearestExp}&type=all&money=all&limit=100`)}`,
+          ];
+          let rows = null;
+          for (const u of chainUrls) {
+            try {
+              const r = await fetch(u, { signal: AbortSignal.timeout(9000) });
+              if (!r.ok) continue;
+              const d = await r.json();
+              const r2 = d?.data?.table?.rows;
+              if (r2?.length) { rows = r2; break; }
+            } catch (_) {}
+          }
+
+          if (rows?.length) {
+            // Strike ATM
+            const atmRow = rows.reduce((best, row) => {
+              const s = parseStrike(row.strike);
+              if (!s) return best;
+              const d = Math.abs(s - currentPrice);
+              return !best || d < best.d ? { row, d, s } : best;
+            }, null);
+
+            if (atmRow) {
+              const ivs = [parseNasdaqIV(atmRow.row.c_IV), parseNasdaqIV(atmRow.row.p_IV)]
+                .filter(v => v != null && v > 0.01 && v < 5);
+
+              if (ivs.length) {
+                const ivAnnual = ivs.reduce((a, b) => a + b, 0) / ivs.length;
+                const ivDaily  = ivAnnual / Math.sqrt(252);
+                const atmStrike = atmRow.s;
+
+                // Skew OTM
+                const putTarget  = currentPrice * 0.93;
+                const callTarget = currentPrice * 1.07;
+                const otmPutRows  = rows.filter(r => { const s = parseStrike(r.strike); return s && s < currentPrice * 0.98 && s > currentPrice * 0.70; });
+                const otmCallRows = rows.filter(r => { const s = parseStrike(r.strike); return s && s > currentPrice * 1.02 && s < currentPrice * 1.30; });
+
+                let skewData = null;
+                if (otmPutRows.length && otmCallRows.length) {
+                  const otmPutRow  = otmPutRows.reduce((b, r)  => { const s = parseStrike(r.strike); return !b || Math.abs(s - putTarget)  < Math.abs(parseStrike(b.strike) - putTarget)  ? r : b; }, null);
+                  const otmCallRow = otmCallRows.reduce((b, r) => { const s = parseStrike(r.strike); return !b || Math.abs(s - callTarget) < Math.abs(parseStrike(b.strike) - callTarget) ? r : b; }, null);
+                  const piv = parseNasdaqIV(otmPutRow?.p_IV);
+                  const civ = parseNasdaqIV(otmCallRow?.c_IV);
+                  if (piv && civ) {
+                    skewData = {
+                      skew: piv - civ, putIV: piv, callIV: civ,
+                      putStrike:  parseStrike(otmPutRow?.strike),
+                      callStrike: parseStrike(otmCallRow?.strike),
+                    };
+                  }
+                }
+                return { ivAnnual, ivDaily, atmStrike, daysToExp, skewData };
+              }
+            }
+          }
+        }
+      }
+    } catch (e) { console.warn('Nasdaq IV fail:', e.message); }
+  }
+
+  // ── Yahoo Finance v7 fallback (cu multiple proxies) ──
+  async function tryYahoo(path) {
+    const hosts   = ['https://query2.finance.yahoo.com', 'https://query1.finance.yahoo.com'];
+    const mkProxy = [
       u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
       u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
     ];
-    for (const host of hosts) {
-      for (const mkProxy of proxies) {
-        try {
-          const r = await fetch(mkProxy(`${host}${path}`), { signal: AbortSignal.timeout(9000) });
-          if (!r.ok) continue;
-          const json = await r.json();
-          if (json?.optionChain?.result?.[0]) return json;
-        } catch (_) { /* incearca urmatorul */ }
-      }
+    for (const h of hosts) for (const mk of mkProxy) {
+      try {
+        const r = await fetch(mk(`${h}${path}`), { signal: AbortSignal.timeout(9000) });
+        if (!r.ok) continue;
+        const j = await r.json();
+        if (j?.optionChain?.result?.[0]) return j;
+      } catch (_) {}
     }
     return null;
   }
 
   try {
-    const data   = await tryFetch(`/v7/finance/options/${ticker}`);
+    const data = await tryYahoo(`/v7/finance/options/${ticker}`);
     if (!data) return null;
     const result = data.optionChain.result[0];
-
-    const now      = Date.now() / 1000;
-    const target30 = now + 30 * 86400;
-
-    // Cel mai apropiat de 30 de zile, minim 7 zile distanta
+    const now    = Date.now() / 1000;
+    const t30    = now + 30 * 86400;
     const expDates = (result.expirationDates || []).filter(d => d > now + 7 * 86400);
     if (!expDates.length) return null;
-    const nearestExp = expDates.reduce((a, b) =>
-      Math.abs(b - target30) < Math.abs(a - target30) ? b : a
-    );
+    const nearestExp = expDates.reduce((a, b) => Math.abs(b - t30) < Math.abs(a - t30) ? b : a);
 
-    // Descarca lantul de optiuni pentru expirarea aleasa
-    const data2 = await tryFetch(`/v7/finance/options/${ticker}?date=${nearestExp}`);
+    const data2 = await tryYahoo(`/v7/finance/options/${ticker}?date=${nearestExp}`);
     if (!data2) return null;
-    const opts  = data2?.optionChain?.result?.[0]?.options?.[0];
+    const opts = data2?.optionChain?.result?.[0]?.options?.[0];
     if (!opts) return null;
 
     const calls = (opts.calls || []).filter(c => c.impliedVolatility > 0.01 && c.impliedVolatility < 5);
     const puts  = (opts.puts  || []).filter(p => p.impliedVolatility > 0.01 && p.impliedVolatility < 5);
     if (!calls.length && !puts.length) return null;
 
-    // Strike ATM = cel mai apropiat de pretul curent
-    const allStrikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a - b);
-    const atmStrike  = allStrikes.reduce((a, b) =>
-      Math.abs(b - currentPrice) < Math.abs(a - currentPrice) ? b : a
-    );
-
+    const allStrikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a-b);
+    const atmStrike  = allStrikes.reduce((a,b) => Math.abs(b - currentPrice) < Math.abs(a - currentPrice) ? b : a);
     const atmCall = calls.find(c => c.strike === atmStrike);
     const atmPut  = puts.find(p  => p.strike === atmStrike);
-    const ivs     = [atmCall?.impliedVolatility, atmPut?.impliedVolatility].filter(v => v > 0.01 && v < 5);
+    const ivs = [atmCall?.impliedVolatility, atmPut?.impliedVolatility].filter(v => v > 0.01 && v < 5);
     if (!ivs.length) return null;
 
-    const ivAnnual  = ivs.reduce((a, b) => a + b, 0) / ivs.length;
+    const ivAnnual  = ivs.reduce((a,b) => a+b, 0) / ivs.length;
     const ivDaily   = ivAnnual / Math.sqrt(252);
     const daysToExp = Math.round((nearestExp - now) / 86400);
 
-    // ── Put/Call Skew ─────────────────────────────────
-    // OTM put la ~7% sub pret, OTM call la ~7% peste pret
-    // Skew = IV(put OTM) - IV(call OTM): pozitiv = piata se teme de scadere
-    const OTM_TARGET = 0.07;
-    const putTarget  = currentPrice * (1 - OTM_TARGET);
-    const callTarget = currentPrice * (1 + OTM_TARGET);
-
+    const putTarget  = currentPrice * 0.93;
+    const callTarget = currentPrice * 1.07;
     const otmPuts  = puts.filter(p  => p.strike < currentPrice * 0.98 && p.strike > currentPrice * 0.70);
     const otmCalls = calls.filter(c => c.strike > currentPrice * 1.02 && c.strike < currentPrice * 1.30);
-
     let skewData = null;
     if (otmPuts.length && otmCalls.length) {
-      const otmPut  = otmPuts.reduce((a, b)  => Math.abs(b.strike - putTarget)  < Math.abs(a.strike - putTarget)  ? b : a);
-      const otmCall = otmCalls.reduce((a, b) => Math.abs(b.strike - callTarget) < Math.abs(a.strike - callTarget) ? b : a);
+      const otmPut  = otmPuts.reduce((a,b)  => Math.abs(b.strike - putTarget)  < Math.abs(a.strike - putTarget)  ? b : a);
+      const otmCall = otmCalls.reduce((a,b) => Math.abs(b.strike - callTarget) < Math.abs(a.strike - callTarget) ? b : a);
       if (otmPut?.impliedVolatility > 0.01 && otmCall?.impliedVolatility > 0.01) {
         skewData = {
-          skew:       otmPut.impliedVolatility - otmCall.impliedVolatility,
-          putIV:      otmPut.impliedVolatility,
-          callIV:     otmCall.impliedVolatility,
-          putStrike:  otmPut.strike,
-          callStrike: otmCall.strike,
+          skew: otmPut.impliedVolatility - otmCall.impliedVolatility,
+          putIV: otmPut.impliedVolatility, callIV: otmCall.impliedVolatility,
+          putStrike: otmPut.strike, callStrike: otmCall.strike,
         };
       }
     }
-
     return { ivAnnual, ivDaily, atmStrike, daysToExp, skewData };
   } catch (e) {
-    console.warn('IV fetch error:', e);
+    console.warn('Yahoo IV fetch error:', e);
     return null;
   }
 }

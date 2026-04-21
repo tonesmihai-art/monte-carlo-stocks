@@ -540,35 +540,66 @@ async function runSimulation() {
     let ivData = null;
     try { ivData = await fetchImpliedVolatility(ticker, currentPrice); } catch (e) { /* silent */ }
 
+    // ── Fallback: IV estimat din VIX + sigma istorica ──
+    // Folosit cand API-urile de optiuni nu raspund (EU/RO stocks, CORS, etc.)
+    let ivEstimated = false;
+    if (!ivData) {
+      try {
+        const vixFallback = await Promise.race([
+          fetchVIX(),
+          new Promise(res => setTimeout(() => res(null), 4000)),
+        ]);
+        const vixVal = vixFallback?.vix;
+        if (vixVal && vixVal > 0) {
+          const sigmaAnnual  = sigma * Math.sqrt(252);
+          // IV ≈ sigma * (VIX / VIX_neutral) * premium_factor
+          // VIX_neutral = 20 (medie istorica pe termen lung)
+          // premium_factor = 1.12 (IV > HV cu ~12% in medie)
+          const ivEstAnnual = sigmaAnnual * (vixVal / 20) * 1.12;
+          const ivEstDaily  = ivEstAnnual / Math.sqrt(252);
+          // Skew estimat: creste cu VIX (frica = put-uri mai scumpe)
+          // VIX=15→0%, VIX=20→3%, VIX=30→9%
+          const skewEst = Math.max(0, (vixVal - 15) * 0.006);
+          ivData = {
+            ivAnnual: ivEstAnnual, ivDaily: ivEstDaily,
+            atmStrike: null, daysToExp: 30,
+            skewData: { skew: skewEst, putIV: null, callIV: null,
+                        putStrike: null, callStrike: null },
+          };
+          ivEstimated = true;
+        }
+      } catch (_) {}
+    }
+
     if (ivData) {
       const ivAnnPct = (ivData.ivAnnual * 100).toFixed(1);
       const ivRatio  = ivData.ivDaily / sigma;
       const ivColor  = ivRatio < 0.85 ? 'green' : ivRatio < 1.20 ? 'yellow' : 'red';
       setPillColor('pill-iv', ivColor);
-      $('info-iv').textContent = `${ivAnnPct}%/an · ${ivData.daysToExp}z`;
+      $('info-iv').textContent = ivEstimated
+        ? `~${ivAnnPct}%/an est.`
+        : `${ivAnnPct}%/an · ${ivData.daysToExp}z`;
     } else {
       setPillColor('pill-iv', 'gray');
       $('info-iv').textContent = 'N/A';
     }
 
     // ── Put/Call Skew → ajustare drift ───────────────
-    // Skew = IV(put OTM) - IV(call OTM): pozitiv = teama de scadere → drift mai jos
-    // Normalizam fata de skew-ul tipic al actiunilor (~7%) si fata de sigma actiunii
     let skewDriftAdj = 0;
     if (ivData?.skewData) {
       const { skew } = ivData.skewData;
-      const NEUTRAL_SKEW = 0.07; // skew tipic pentru actiuni
+      const NEUTRAL_SKEW = 0.07;
       const sigmaAnnual  = sigma * Math.sqrt(252);
-      // Exces de skew fata de normal, relativ la volatilitatea actiunii
       const normalizedSkew = (skew - NEUTRAL_SKEW) / Math.max(sigmaAnnual, 0.15);
-      // Ajustare drift: max ~0.025% pe zi (tanh pentru a evita valori extreme)
       skewDriftAdj = -Math.tanh(normalizedSkew * 1.5) * 0.00025;
 
       const skewPct   = (skew * 100).toFixed(1);
       const skewColor = skew < 0 ? 'green' : skew < 0.08 ? 'yellow' : skew < 0.15 ? 'orange' : 'red';
       const skewSign  = skew >= 0 ? '+' : '';
       setPillColor('pill-skew', skewColor);
-      $('info-skew').textContent = `${skewSign}${skewPct}%`;
+      $('info-skew').textContent = ivEstimated
+        ? `~${skewSign}${skewPct}% est.`
+        : `${skewSign}${skewPct}%`;
     } else {
       setPillColor('pill-skew', 'gray');
       $('info-skew').textContent = 'N/A';

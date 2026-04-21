@@ -487,14 +487,113 @@ export function classifyNewsTier(titlu, ticker, companyName, sector, industry) {
   }
 
   // ── Tier 3: Macro ────────────────────────────────────
-  // Stire economica generala — influenteaza piata in general
-  const isMacro = [
-    'fed','ecb','inflation','gdp','interest rate','recession','central bank',
-    'market','economy','trade war','tariff','powell','lagarde','yield curve',
+  // Fiecare tip de macro are 3 niveluri de expunere per sector:
+  //  'direct'   → weight 0.30  (sector primar afectat)
+  //  'indirect' → weight 0.12  (afectat prin lant de valoare / chiriasi / clienti)
+  //  null       → Tier 4       (irelevant pentru acest sector)
+  //
+  // Logica: "tariff news" pt Real Estate = indirect (chiriasii mall-ului sunt retaileri)
+  //          "tariff news" pt Healthcare = null (nicio legatura)
+
+  const MACRO_EXPOSURE = {
+    // Tarife comerciale, razboi comercial
+    tarife: {
+      keywords: ['tariff','trade war','import','export','customs','embargo','trade deal'],
+      expunere: {
+        'Technology':             'direct',
+        'Industrials':            'direct',
+        'Basic Materials':        'direct',
+        'Consumer Cyclical':      'direct',
+        'Consumer Defensive':     'direct',
+        'Energy':                 'direct',
+        'Financial Services':     'indirect',   // finantare comert international
+        'Real Estate':            'indirect',   // chiriasii retaileri afectati
+        'Communication Services': 'indirect',   // publicitate afectata de consum
+        'Utilities':              null,
+        'Healthcare':             null,
+        'Cryptocurrency':         'indirect',
+      },
+    },
+    // Pandemii, sanatate publica
+    sanatate: {
+      keywords: ['pandemic','virus','covid','outbreak','vaccine','lockdown','epidemic'],
+      expunere: {
+        'Healthcare':             'direct',
+        'Consumer Cyclical':      'direct',     // travel, restaurant
+        'Real Estate':            'indirect',   // occupancy office/retail
+        'Financial Services':     'indirect',
+        'Utilities':              'indirect',
+        'Technology':             'indirect',   // remote work boom/bust
+        'Consumer Defensive':     'indirect',
+        'Industrials':            'indirect',
+        'Basic Materials':        null,
+        'Energy':                 'indirect',
+        'Communication Services': 'indirect',
+        'Cryptocurrency':         null,
+      },
+    },
+    // Alegeri, reglementari, politica
+    politica: {
+      keywords: ['election','regulation','congress','senate','parliament','government policy','antitrust','legislation'],
+      expunere: {
+        'Financial Services':     'direct',
+        'Technology':             'direct',
+        'Energy':                 'direct',
+        'Communication Services': 'direct',
+        'Healthcare':             'direct',     // reglementari preturi medicamente
+        'Industrials':            'indirect',
+        'Consumer Cyclical':      'indirect',
+        'Consumer Defensive':     'indirect',
+        'Real Estate':            'indirect',   // politici de zonare, taxe
+        'Utilities':              'indirect',
+        'Basic Materials':        'indirect',
+        'Cryptocurrency':         'direct',
+      },
+    },
+    // Geopolitica, razboi, sanctiuni
+    geopolitic: {
+      keywords: ['war','conflict','sanction','nato','invasion','military','troops','nuclear'],
+      expunere: {
+        'Energy':                 'direct',
+        'Basic Materials':        'direct',
+        'Industrials':            'direct',
+        'Financial Services':     'direct',
+        'Technology':             'direct',
+        'Consumer Defensive':     'indirect',
+        'Consumer Cyclical':      'indirect',
+        'Real Estate':            'indirect',
+        'Healthcare':             'indirect',
+        'Utilities':              'indirect',
+        'Communication Services': 'indirect',
+        'Cryptocurrency':         'indirect',
+      },
+    },
+  };
+
+  // Verifica fiecare tip de macro
+  for (const [tip, { keywords, expunere }] of Object.entries(MACRO_EXPOSURE)) {
+    const match = keywords.some(kw => t.includes(kw));
+    if (!match) continue;
+
+    const nivel = expunere[sector] ?? null;
+    if (nivel === 'direct') {
+      return { tier: 3, relevanta: 0.22, categorie: `macro_${tip}_direct`, weight: 0.30 };
+    }
+    if (nivel === 'indirect') {
+      return { tier: 3, relevanta: 0.12, categorie: `macro_${tip}_indirect`, weight: 0.12 };
+    }
+    // nivel === null → cade in Tier 4 mai jos
+    return { tier: 4, relevanta: 0.03, categorie: `macro_${tip}_irelevant`, weight: 0 };
+  }
+
+  // A) Macro universal — afecteaza TOATE sectoarele
+  const isMacroUniversal = [
+    'fed','ecb','federal reserve','interest rate','inflation','recession',
+    'central bank','gdp','yield curve','powell','lagarde','monetary policy',
   ].some(kw => t.includes(kw));
 
-  if (isMacro) {
-    return { tier: 3, relevanta: 0.20, categorie: 'macro_general', weight: 0.3 };
+  if (isMacroUniversal) {
+    return { tier: 3, relevanta: 0.20, categorie: 'macro_universal', weight: 0.30 };
   }
 
   // ── Tier 4: Zgomot ───────────────────────────────────

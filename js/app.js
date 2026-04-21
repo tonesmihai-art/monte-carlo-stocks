@@ -110,14 +110,30 @@ function setPillColor(pillId, color) {
 // Extrage IV din contractul ATM cel mai aproape de 30 zile
 // si calculeaza skew-ul directional din optiunile OTM
 async function fetchImpliedVolatility(ticker, currentPrice) {
+  // Incearca mai multe proxies si hosturi Yahoo pana gaseste unul care raspunde
+  async function tryFetch(path) {
+    const hosts  = ['https://query2.finance.yahoo.com', 'https://query1.finance.yahoo.com'];
+    const proxies = [
+      u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+      u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    ];
+    for (const host of hosts) {
+      for (const mkProxy of proxies) {
+        try {
+          const r = await fetch(mkProxy(`${host}${path}`), { signal: AbortSignal.timeout(9000) });
+          if (!r.ok) continue;
+          const json = await r.json();
+          if (json?.optionChain?.result?.[0]) return json;
+        } catch (_) { /* incearca urmatorul */ }
+      }
+    }
+    return null;
+  }
+
   try {
-    const url   = `https://query2.finance.yahoo.com/v7/finance/options/${ticker}`;
-    const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-    const r     = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return null;
-    const data   = await r.json();
-    const result = data?.optionChain?.result?.[0];
-    if (!result) return null;
+    const data   = await tryFetch(`/v7/finance/options/${ticker}`);
+    if (!data) return null;
+    const result = data.optionChain.result[0];
 
     const now      = Date.now() / 1000;
     const target30 = now + 30 * 86400;
@@ -130,12 +146,9 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
     );
 
     // Descarca lantul de optiuni pentru expirarea aleasa
-    const url2   = `https://query2.finance.yahoo.com/v7/finance/options/${ticker}?date=${nearestExp}`;
-    const proxy2 = `https://corsproxy.io/?${encodeURIComponent(url2)}`;
-    const r2     = await fetch(proxy2, { signal: AbortSignal.timeout(8000) });
-    if (!r2.ok) return null;
-    const data2  = await r2.json();
-    const opts   = data2?.optionChain?.result?.[0]?.options?.[0];
+    const data2 = await tryFetch(`/v7/finance/options/${ticker}?date=${nearestExp}`);
+    if (!data2) return null;
+    const opts  = data2?.optionChain?.result?.[0]?.options?.[0];
     if (!opts) return null;
 
     const calls = (opts.calls || []).filter(c => c.impliedVolatility > 0.01 && c.impliedVolatility < 5);

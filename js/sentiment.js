@@ -242,6 +242,11 @@ const TICKER_SECTOR_MAP = {
   'TLV.RO': { sector: 'Financial Services',     industry: 'Banks — Regional' },
   'SNP.RO': { sector: 'Energy',                 industry: 'Oil & Gas Integrated' },
   'BRD.RO': { sector: 'Financial Services',     industry: 'Banks — Regional' },
+   // Franta (.PA)
+  'TTE.PA': { sector: 'Energy',                 industry: 'Oil & Gas Integrated' },
+  'ENX.PA': { sector: 'Financial Services',     industry: 'Banks — Regional' },
+
+  
 };
 
 // ── Detectie sector din Yahoo Finance ────────────────

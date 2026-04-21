@@ -1025,6 +1025,199 @@ function renderPeriod(periodData, tab) {
   });
 }
 
+// ── Valuare Fundamentala — 4 metode ──────────────────
+const VAL_SECTOR_WEIGHTS = {
+  tutun:        { eps: 0.30, fcf: 0.30, nav: 0.10, dcf: 0.30 },
+  energy:       { eps: 0.15, fcf: 0.35, nav: 0.10, dcf: 0.40 },
+  utilitati:    { eps: 0.20, fcf: 0.25, nav: 0.15, dcf: 0.40 },
+  asigurari:    { eps: 0.35, fcf: 0.20, nav: 0.30, dcf: 0.15 },
+  conglomerate: { eps: 0.25, fcf: 0.25, nav: 0.20, dcf: 0.30 },
+  consum:       { eps: 0.25, fcf: 0.25, nav: 0.15, dcf: 0.35 },
+  tech:         { eps: 0.20, fcf: 0.15, nav: 0.10, dcf: 0.55 },
+  reit:         { eps: 0.10, fcf: 0.35, nav: 0.40, dcf: 0.15 },
+  shipping:     { eps: 0.20, fcf: 0.35, nav: 0.15, dcf: 0.30 },
+};
+
+// Yahoo Finance → sector key
+const YAHOO_TO_VAL_SECTOR = {
+  'Technology':             'tech',
+  'Communication Services': 'tech',
+  'Energy':                 'energy',
+  'Utilities':              'utilitati',
+  'Financial Services':     'asigurari',
+  'Insurance':              'asigurari',
+  'Real Estate':            'reit',
+  'Industrials':            'conglomerate',
+  'Healthcare':             'conglomerate',
+  'Basic Materials':        'conglomerate',
+  'Consumer Defensive':     'consum',
+  'Consumer Cyclical':      'consum',
+};
+
+function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shares, sector }) {
+  const w = VAL_SECTOR_WEIGHTS[sector] || VAL_SECTOR_WEIGHTS.tech;
+
+  // Val EPS = EPS × P/E_corect
+  const valEPS = (eps > 0 && pe > 0) ? eps * pe : null;
+
+  // Val FCF = FCF/share × P/E_corect
+  const valFCF = (fcf > 0 && pe > 0) ? fcf * pe : null;
+
+  // NAV = (Active + Cash − Datorii) / Actiuni_M  → valoare per actiune
+  const valNAV = (assets != null && cash != null && debt != null && shares > 0)
+    ? (assets + cash - debt) / shares
+    : null;
+
+  // DCF: 10 ani FCF actualizat + valoare terminala Gordon Growth
+  let valDCF = null;
+  if (fcf > 0 && growth != null && wacc != null && tgr != null && wacc > tgr) {
+    const g = growth / 100;
+    const r = wacc   / 100;
+    const t = tgr    / 100;
+    let dcfSum = 0;
+    for (let n = 1; n <= 10; n++) {
+      dcfSum += (fcf * Math.pow(1 + g, n)) / Math.pow(1 + r, n);
+    }
+    const fcf10     = fcf * Math.pow(1 + g, 10);
+    const terminalPV = (fcf10 * (1 + t) / (r - t)) / Math.pow(1 + r, 10);
+    valDCF = dcfSum + terminalPV;
+  }
+
+  // Medie ponderata — renormalizeaza daca unele metode sunt N/A
+  const methods = [
+    { val: valEPS, w: w.eps },
+    { val: valFCF, w: w.fcf },
+    { val: valNAV, w: w.nav },
+    { val: valDCF, w: w.dcf },
+  ];
+  const avail = methods.filter(m => m.val != null && isFinite(m.val));
+  let weighted = null;
+  if (avail.length > 0) {
+    const totalW = avail.reduce((s, m) => s + m.w, 0);
+    weighted = avail.reduce((s, m) => s + m.val * m.w / totalW, 0);
+  }
+
+  return { valEPS, valFCF, valNAV, valDCF, weighted, w };
+}
+
+function updateValuare() {
+  const getNum = id => {
+    const v = parseFloat($(`val-${id}`)?.value);
+    return isNaN(v) ? null : v;
+  };
+  const sector    = $('val-sector')?.value || 'tech';
+  const priceEl   = $('val-current-price');
+  const curPrice  = priceEl ? parseFloat(priceEl.dataset.price)    : 0;
+  const currency  = priceEl ? (priceEl.dataset.currency || 'USD')  : 'USD';
+  const sym       = currency === 'USD' ? '$' : currency + ' ';
+
+  const result = calcValuare({
+    eps:    getNum('eps'),
+    pe:     getNum('pe'),
+    fcf:    getNum('fcf'),
+    growth: getNum('growth'),
+    wacc:   getNum('wacc'),
+    tgr:    getNum('tgr'),
+    assets: getNum('assets'),
+    cash:   getNum('cash'),
+    debt:   getNum('debt'),
+    shares: getNum('shares'),
+    sector,
+  });
+  const { valEPS, valFCF, valNAV, valDCF, weighted, w } = result;
+
+  function fv(v) { return v != null ? `${sym}${v.toFixed(2)}` : '—'; }
+
+  // Marja de siguranta
+  let marginHtml = '';
+  if (weighted != null && curPrice > 0) {
+    const margin = (weighted - curPrice) / curPrice * 100;
+    const color  = margin > 20 ? '#66bb6a' : margin > 0 ? '#ffee58' : '#ef5350';
+    const label  = margin > 20 ? '✔ Subapreciat' : margin > 0 ? '≈ Corect evaluat' : '✘ Supraevaluat';
+    marginHtml = `
+      <div class="val-margin-card"
+           style="background:${color}18;border:1px solid ${color}44;">
+        <div class="vm-label" style="color:${color}99;">Marja siguranta</div>
+        <div class="vm-val"   style="color:${color};">${margin >= 0 ? '+' : ''}${margin.toFixed(1)}%</div>
+        <div class="vm-weight" style="color:${color}77;">${label}</div>
+      </div>`;
+  }
+
+  const grid = $('val-results-grid');
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="val-method-card">
+      <div class="vm-label">Val. PE</div>
+      <div class="vm-val">${fv(valEPS)}</div>
+      <div class="vm-weight">Pondere ${(w.eps * 100).toFixed(0)}%</div>
+    </div>
+    <div class="val-method-card">
+      <div class="vm-label">Val. FCF</div>
+      <div class="vm-val">${fv(valFCF)}</div>
+      <div class="vm-weight">Pondere ${(w.fcf * 100).toFixed(0)}%</div>
+    </div>
+    <div class="val-method-card">
+      <div class="vm-label">Val. NAV</div>
+      <div class="vm-val">${fv(valNAV)}</div>
+      <div class="vm-weight">Pondere ${(w.nav * 100).toFixed(0)}%</div>
+    </div>
+    <div class="val-method-card">
+      <div class="vm-label">Val. DCF</div>
+      <div class="vm-val">${fv(valDCF)}</div>
+      <div class="vm-weight">Pondere ${(w.dcf * 100).toFixed(0)}%</div>
+    </div>
+    <div class="val-weighted-card">
+      <div class="vm-label">Val. Medie Ponderată</div>
+      <div class="vm-val">${fv(weighted)}</div>
+      <div class="vm-weight">Preț curent: ${sym}${curPrice > 0 ? curPrice.toFixed(2) : '—'}</div>
+    </div>
+    ${marginHtml}`;
+}
+
+window.toggleValuare = function() {
+  const content = $('val-content');
+  const icon    = $('val-toggle-icon');
+  if (!content || !icon) return;
+  const isOpen = content.style.display !== 'none';
+  content.style.display = isOpen ? 'none' : 'block';
+  icon.textContent = isOpen ? '▼ Extinde' : '▲ Restrânge';
+};
+
+function initValuarePanel(currentPrice, currency, yahooSector) {
+  const panel = $('valuation-panel');
+  if (!panel) return;
+
+  // Stocheaza pretul curent pentru calcul marja
+  let priceEl = $('val-current-price');
+  if (!priceEl) {
+    priceEl = document.createElement('span');
+    priceEl.id = 'val-current-price';
+    priceEl.style.display = 'none';
+    panel.appendChild(priceEl);
+  }
+  priceEl.dataset.price    = currentPrice;
+  priceEl.dataset.currency = currency || 'USD';
+
+  // Auto-selecteaza sectorul din Yahoo Finance
+  if (yahooSector && YAHOO_TO_VAL_SECTOR[yahooSector]) {
+    const sel = $('val-sector');
+    if (sel) sel.value = YAHOO_TO_VAL_SECTOR[yahooSector];
+  }
+
+  // Ataseaza listeners o singura data
+  if (!panel.dataset.listenersAttached) {
+    ['sector','eps','pe','fcf','growth','wacc','tgr','assets','cash','debt','shares'].forEach(id => {
+      const el = $(`val-${id}`);
+      el?.addEventListener('input',  updateValuare);
+      el?.addEventListener('change', updateValuare);
+    });
+    panel.dataset.listenersAttached = '1';
+  }
+
+  panel.style.display = 'block';
+  updateValuare();
+}
+
 // ── Simulare principala ───────────────────────────────
 async function runSimulation() {
   const ticker      = $('ticker-input').value.trim().toUpperCase();
@@ -1036,6 +1229,8 @@ async function runSimulation() {
   $('sentiment-section').style.display = 'none';
   const sectorBadgeEl = $('sector-badge');
   if (sectorBadgeEl) sectorBadgeEl.style.display = 'none';
+  const valPanel = $('valuation-panel');
+  if (valPanel) valPanel.style.display = 'none';
   $('run-btn').disabled    = true;
   $('run-btn').textContent = 'Se ruleaza...';
 
@@ -1139,6 +1334,9 @@ async function runSimulation() {
       if (sectorResult.status === 'fulfilled') {
         renderSectorBadge(sectorResult.value.sector, sectorResult.value.industry,
                           vixData, sectorResult.value.weights);
+        initValuarePanel(currentPrice, currency, sectorResult.value.sector);
+      } else {
+        initValuarePanel(currentPrice, currency, null);
       }
     }
 

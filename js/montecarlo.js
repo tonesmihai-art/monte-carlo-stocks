@@ -1,18 +1,87 @@
 // ─────────────────────────────────────────────────────
-//  MONTE CARLO — Geometric Brownian Motion + GARCH(1,1)
-//  pret_nou = pret_vechi * exp(drift + sigma_t * Z)
-//  sigma_t variaza in timp: GARCH(1,1)
+//  MONTE CARLO — GBM + GARCH(1,1) + Fat Tails (Student-t)
+//  pret_nou = pret_vechi * exp(drift + sigma_t * Z_t)
+//  sigma_t  : GARCH(1,1) — volatilitate variabila in timp
+//  Z_t      : Student-t(ν) — cozi groase (crashuri mai realiste)
 //  + Mean Reversion (Ornstein-Uhlenbeck) pe 50 de zile
 // ─────────────────────────────────────────────────────
 
 const NUM_SIMS = 30_000;
 
-// Box-Muller: numere aleatoare cu distributie normala
+// ── Box-Muller: distributie normala N(0,1) ────────────
 function randNormal() {
   let u, v;
   do { u = Math.random(); } while (u === 0);
   do { v = Math.random(); } while (v === 0);
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// ── Student-t(ν) scalat la varianta unitara ───────────
+//
+//  De ce Student-t?
+//  Distributia normala subestimeaza dramatic evenimentele extreme:
+//  un crash de -5σ are probabilitate 1 in 3.5 milioane zile sub gaussiana,
+//  dar se intampla in realitate de cateva ori pe deceniu.
+//  Student-t cu ν mic (3-6) produce cozi groase fara a modifica
+//  media sau volatilitatea generala a simularii.
+//
+//  Metoda eficienta (fara a genera ν numere normale):
+//  - Z  ~ N(0,1)  prin Box-Muller
+//  - χ²(ν) generat din ν/2 valori Uniforme: -2·log(U) ~ χ²(2)
+//  - T  = Z / √(χ²/ν), scalat la varianta 1: ×√((ν-2)/ν)
+//
+function randStudentT(nu) {
+  const z    = randNormal();
+  const half = Math.floor(nu / 2);
+
+  // χ²(2k) = -2 · Σ log(Ui), Ui ~ Uniform(0,1)  → O(ν/2) random() calls
+  let chi2 = 0;
+  for (let i = 0; i < half; i++) {
+    let u;
+    do { u = Math.random(); } while (u === 0);
+    chi2 -= 2 * Math.log(u);                    // fiecare termen ~ χ²(2)
+  }
+  if (nu % 2 !== 0) {                           // ν impar: adauga un χ²(1)
+    const w = randNormal();
+    chi2   += w * w;
+  }
+
+  // Scalare la varianta unitara: E[T²] = ν/(ν-2), deci impartim la √(ν/(ν-2))
+  return z / Math.sqrt(chi2 / nu) * Math.sqrt((nu - 2) / nu);
+}
+
+// ── Estimare ν (grade libertate) din date istorice ───
+//
+//  Excess kurtosis al distributiei Student-t(ν) = 6/(ν-4) pentru ν>4
+//  Inversand: ν = 6/kurtosis + 4
+//
+//  Interpretare practica:
+//   ν = 3-4 : cozi foarte groase (crypto, penny stocks)
+//   ν = 4-6 : actiuni volatile (TSLA, NVDA)
+//   ν = 6-10: actiuni normale (MSFT, OMV)
+//   ν > 20  : practic normal (indici diversificati)
+//
+export function estimateNu(logReturns) {
+  const n    = logReturns.length;
+  if (n < 30) return 8; // fallback rezonabil
+
+  const mean = logReturns.reduce((a, b) => a + b, 0) / n;
+  const res  = logReturns.map(r => r - mean);
+
+  const variance = res.reduce((s, r) => s + r * r, 0) / n;
+  if (variance === 0) return 8;
+
+  // Kurtosis in exces (kurtosis normala = 3, deci scadem 3)
+  const kurtosis = res.reduce((s, r) => s + r ** 4, 0) / (n * variance ** 2) - 3;
+
+  // ν din kurtosis; clampit la [3, 30]
+  let nu;
+  if (kurtosis <= 0.1) {
+    nu = 30;                       // distributie practic normala
+  } else {
+    nu = 6 / kurtosis + 4;
+  }
+  return +Math.max(3, Math.min(30, nu)).toFixed(1);
 }
 
 // ── GARCH(1,1) — estimare parametri din date istorice ──
@@ -105,7 +174,10 @@ export function calcParams(closes, volumes = []) {
   // Estimare GARCH(1,1) din randamentele istorice
   const garch = estimateGARCH(logReturns);
 
-  return { drift, sigma, mean, variance, mean50, deviationPct, volumeTrend, garch };
+  // Estimare ν (grade libertate Student-t) din kurtosis
+  const nu = estimateNu(logReturns);
+
+  return { drift, sigma, mean, variance, mean50, deviationPct, volumeTrend, garch, nu };
 }
 
 // Calculeaza trendul de volum pe ultimele 10 zile
@@ -163,18 +235,27 @@ export function simulate(currentPrice, drift, sigma, days,
                           sigmaAdj    = null,
                           meanRevStrength = 0,
                           mean50      = null,
-                          garchParams = null) {
+                          garchParams = null,
+                          nu          = null) {
 
   const d      = driftAdj ?? drift;
   const sBase  = sigmaAdj ?? sigma;
   const target = mean50 ?? currentPrice;
   const matrix = new Float64Array((days + 1) * NUM_SIMS);
 
+  // Alege generatorul de socuri: Student-t(ν) sau Normal
+  // ν < 29 => fat tails; ν >= 29 => practic normal (economie de calcul)
+  const useFatTails = nu != null && nu < 29;
+  const nuInt = useFatTails ? Math.max(3, Math.min(30, Math.round(nu))) : null;
+  const randShock = useFatTails
+    ? () => randStudentT(nuInt)
+    : randNormal;
+
   // Pretul initial identic pentru toate simulatiile
   for (let sim = 0; sim < NUM_SIMS; sim++) matrix[sim] = currentPrice;
 
   if (garchParams) {
-    // ── Simulare cu GARCH(1,1) ──────────────────────────
+    // ── Simulare cu GARCH(1,1) + Fat Tails ──────────────
     //  σ²_t = ω + α·ε²_(t-1) + β·σ²_(t-1)
     //
     //  Fiecare simulare porneste cu aceeasi sigma0 (volatilitatea
@@ -206,7 +287,7 @@ export function simulate(currentPrice, drift, sigma, days,
         varT[sim] = Math.min(varT[sim], sBase * sBase * 25); // max 5× sigma initiala
 
         const sigmaT = Math.sqrt(varT[sim]);
-        const z      = randNormal();
+        const z      = randShock();   // Normal sau Student-t(ν)
         const eps    = sigmaT * z;
         epsT[sim]    = eps; // salveaza pentru urmatoarea zi
 
@@ -220,13 +301,13 @@ export function simulate(currentPrice, drift, sigma, days,
     }
 
   } else {
-    // ── Simulare clasica GBM — sigma constanta ─────────
+    // ── Simulare GBM clasica (sigma constanta) + Fat Tails
     for (let day = 1; day <= days; day++) {
       const offset     = day * NUM_SIMS;
       const prevOffset = (day - 1) * NUM_SIMS;
       for (let sim = 0; sim < NUM_SIMS; sim++) {
         const prevPrice = matrix[prevOffset + sim];
-        const z         = randNormal();
+        const z         = randShock();   // Normal sau Student-t(ν)
         const revPull   = meanRevStrength > 0 && target > 0
           ? meanRevStrength * Math.log(target / prevPrice)
           : 0;

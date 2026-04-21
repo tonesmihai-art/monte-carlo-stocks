@@ -102,13 +102,13 @@ const PILL_COLORS = {
 function setPillColor(pillId, color) {
   const el = document.getElementById(pillId);
   if (!el) return;
-  // Sterge orice clasa de culoare existenta
   Object.values(PILL_COLORS).forEach(c => el.classList.remove(c));
   if (color && PILL_COLORS[color]) el.classList.add(PILL_COLORS[color]);
 }
 
-// ── Volatilitate implicita din optiuni ───────────────
+// ── Volatilitate implicita din optiuni + Put/Call Skew ─
 // Extrage IV din contractul ATM cel mai aproape de 30 zile
+// si calculeaza skew-ul directional din optiunile OTM
 async function fetchImpliedVolatility(ticker, currentPrice) {
   try {
     const url   = `https://query2.finance.yahoo.com/v7/finance/options/${ticker}`;
@@ -157,7 +157,32 @@ async function fetchImpliedVolatility(ticker, currentPrice) {
     const ivDaily   = ivAnnual / Math.sqrt(252);
     const daysToExp = Math.round((nearestExp - now) / 86400);
 
-    return { ivAnnual, ivDaily, atmStrike, daysToExp };
+    // ── Put/Call Skew ─────────────────────────────────
+    // OTM put la ~7% sub pret, OTM call la ~7% peste pret
+    // Skew = IV(put OTM) - IV(call OTM): pozitiv = piata se teme de scadere
+    const OTM_TARGET = 0.07;
+    const putTarget  = currentPrice * (1 - OTM_TARGET);
+    const callTarget = currentPrice * (1 + OTM_TARGET);
+
+    const otmPuts  = puts.filter(p  => p.strike < currentPrice * 0.98 && p.strike > currentPrice * 0.70);
+    const otmCalls = calls.filter(c => c.strike > currentPrice * 1.02 && c.strike < currentPrice * 1.30);
+
+    let skewData = null;
+    if (otmPuts.length && otmCalls.length) {
+      const otmPut  = otmPuts.reduce((a, b)  => Math.abs(b.strike - putTarget)  < Math.abs(a.strike - putTarget)  ? b : a);
+      const otmCall = otmCalls.reduce((a, b) => Math.abs(b.strike - callTarget) < Math.abs(a.strike - callTarget) ? b : a);
+      if (otmPut?.impliedVolatility > 0.01 && otmCall?.impliedVolatility > 0.01) {
+        skewData = {
+          skew:       otmPut.impliedVolatility - otmCall.impliedVolatility,
+          putIV:      otmPut.impliedVolatility,
+          callIV:     otmCall.impliedVolatility,
+          putStrike:  otmPut.strike,
+          callStrike: otmCall.strike,
+        };
+      }
+    }
+
+    return { ivAnnual, ivDaily, atmStrike, daysToExp, skewData };
   } catch (e) {
     console.warn('IV fetch error:', e);
     return null;
@@ -203,7 +228,6 @@ function renderSectorBadge(sector, industry, vixData, weights) {
                  : vixData.vix < 35 ? '#ffa726'
                  : '#ef5350';
 
-  // Determina descrierea impactului VIX
   const vixImpactDesc = !vixData?.vix
     ? 'Date VIX indisponibile.'
     : vixData.vix < 15
@@ -399,7 +423,6 @@ async function runSimulation() {
     $('info-ma50').textContent = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
 
     // ⑧ Vol trend
-    const vtScore  = volumeTrend?.score ?? 0;
     const vtDetail = volumeTrend?.detail ?? '';
     const vtColor  = vtDetail === 'bullish' ? 'green'
                    : vtDetail === 'bearish' ? 'red'
@@ -409,8 +432,8 @@ async function runSimulation() {
     setPillColor('pill-voltren', vtColor);
     $('info-voltren').textContent = volumeTrend?.label ?? '—';
 
-    // ── 2b. Volatilitate implicita din optiuni (IV) ──────
-    setStatus('Caut volatilitate implicita din optiuni...');
+    // ── 2b. Volatilitate implicita din optiuni (IV) + Skew ──
+    setStatus('Caut volatilitate implicita si skew din optiuni...');
     let ivData = null;
     try { ivData = await fetchImpliedVolatility(ticker, currentPrice); } catch (e) { /* silent */ }
 
@@ -425,8 +448,30 @@ async function runSimulation() {
       $('info-iv').textContent = 'N/A';
     }
 
+    // ── Put/Call Skew → ajustare drift ───────────────
+    // Skew = IV(put OTM) - IV(call OTM): pozitiv = teama de scadere → drift mai jos
+    // Normalizam fata de skew-ul tipic al actiunilor (~7%) si fata de sigma actiunii
+    let skewDriftAdj = 0;
+    if (ivData?.skewData) {
+      const { skew } = ivData.skewData;
+      const NEUTRAL_SKEW = 0.07; // skew tipic pentru actiuni
+      const sigmaAnnual  = sigma * Math.sqrt(252);
+      // Exces de skew fata de normal, relativ la volatilitatea actiunii
+      const normalizedSkew = (skew - NEUTRAL_SKEW) / Math.max(sigmaAnnual, 0.15);
+      // Ajustare drift: max ~0.025% pe zi (tanh pentru a evita valori extreme)
+      skewDriftAdj = -Math.tanh(normalizedSkew * 1.5) * 0.00025;
+
+      const skewPct   = (skew * 100).toFixed(1);
+      const skewColor = skew < 0 ? 'green' : skew < 0.08 ? 'yellow' : skew < 0.15 ? 'orange' : 'red';
+      const skewSign  = skew >= 0 ? '+' : '';
+      setPillColor('pill-skew', skewColor);
+      $('info-skew').textContent = `${skewSign}${skewPct}%`;
+    } else {
+      setPillColor('pill-skew', 'gray');
+      $('info-skew').textContent = 'N/A';
+    }
+
     // Raport de ajustare pentru sigmaAdj (calculat mai tarziu, dupa sentiment)
-    // Stocat ca multiplicator fata de sigma istorica
     let sigmaAdjRatio = null;
 
     // ── 3. Sector + VIX (independent, intotdeauna rulat) ─
@@ -458,7 +503,6 @@ async function runSimulation() {
         driftAdj        = adj.driftAdj;
         sigmaAdj        = adj.sigmaAdj;
         meanRevStrength = adj.meanRevStrength ?? 0;
-        // Raport de ajustare sentiment/VIX fata de sigma istorica (aplicat si pe blended sigma)
         if (sigmaAdj != null && sigma > 0) sigmaAdjRatio = sigmaAdj / sigma;
 
         $('sent-global').textContent = `${sentimentData.sentimentGlobal >= 0 ? '+' : ''}${sentimentData.sentimentGlobal.toFixed(3)}`;
@@ -512,12 +556,15 @@ async function runSimulation() {
       // Sigma blended: IV (forward-looking) + istorica, ponderate dupa orizont
       // 30z: 70% IV | 90z: 33% IV | 180z: 17% IV | 360z: 10% IV
       const sigmaBlended    = blendSigma(sigma, ivData?.ivDaily, days);
-      // Daca avem ajustare sentiment, aplicam acelasi multiplicator pe sigma blended
       const sigmaAdjBlended = sigmaAdjRatio != null ? sigmaBlended * sigmaAdjRatio : null;
 
-      const matrix    = simulate(currentPrice, drift, sigmaBlended, days, null,     null,          meanRevStrength, mean50, garch, nu);
-      const matrixAdj = driftAdj != null
-        ? simulate(currentPrice, drift, sigmaBlended, days, driftAdj, sigmaAdjBlended, meanRevStrength, mean50, garch, nu) : null;
+      // Skew drift aplicat uniform pe ambele simulari (semnal de piata, independent de sentiment)
+      const driftSkewed    = drift    + skewDriftAdj;
+      const driftAdjSkewed = driftAdj != null ? driftAdj + skewDriftAdj : null;
+
+      const matrix    = simulate(currentPrice, driftSkewed, sigmaBlended, days, null,          null,          meanRevStrength, mean50, garch, nu);
+      const matrixAdj = driftAdjSkewed != null
+        ? simulate(currentPrice, driftSkewed, sigmaBlended, days, driftAdjSkewed, sigmaAdjBlended, meanRevStrength, mean50, garch, nu) : null;
       periodResults[days] = {
         days,
         stats:    calcStats(matrix, days, currentPrice),
@@ -546,7 +593,7 @@ async function runSimulation() {
       btn.onclick     = () => {
         tabsEl.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        destroyPeriodCharts(); // doar traj+hist, sentimentul ramine intact
+        destroyPeriodCharts();
         renderPeriod(periodResults[days], days);
       };
       tabsEl.appendChild(btn);

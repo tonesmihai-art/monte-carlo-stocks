@@ -575,6 +575,38 @@ async function _fetchYahooFundamentals(ticker) {
     `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
     `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
   ];
+  // Daca MY_PROXY e setat, incearca-l primul cu timeout mare (Render poate dormi 30s)
+  if (MY_PROXY) {
+    const proxyUrl = `${MY_PROXY}/proxy?url=${encodeURIComponent(
+      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`
+    )}`;
+    try {
+      const json = await _yGet(proxyUrl, 35000);
+      if (typeof json === 'object') {
+        const r = json?.quoteSummary?.result?.[0];
+        if (r) {
+          const fd = r.financialData || {}, ks = r.defaultKeyStatistics || {}, sd = r.summaryDetail || {};
+          const sharesRaw = _yv(ks.sharesOutstanding);
+          const fcfTotal  = _yv(fd.freeCashflow);
+          const eps    = _yv(ks.trailingEps);
+          const pe     = _yv(sd.trailingPE) ?? _yv(sd.forwardPE) ?? null;
+          const growth = _yv(fd.earningsGrowth) != null ? _yv(fd.earningsGrowth) * 100
+                       : _yv(fd.revenueGrowth)  != null ? _yv(fd.revenueGrowth)  * 100 : null;
+          if (eps != null || pe != null || fcfTotal != null) {
+            return {
+              eps, pe, growth,
+              shares:      sharesRaw != null ? sharesRaw / 1e6 : null,
+              fcfPerShare: (fcfTotal != null && sharesRaw > 0) ? fcfTotal / sharesRaw : null,
+              cash:        _yv(fd.totalCash)   != null ? _yv(fd.totalCash)   / 1e6 : null,
+              debt:        _yv(fd.totalDebt)   != null ? _yv(fd.totalDebt)   / 1e6 : null,
+              totalAssets: _yv(fd.totalAssets) != null ? _yv(fd.totalAssets) / 1e6 : null,
+            };
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   for (const url of summaryUrls) {
     for (const px of _getProxies()) {
       try {

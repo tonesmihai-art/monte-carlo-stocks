@@ -217,6 +217,18 @@ const TICKER_SECTOR_MAP = {
   'SO':     { sector: 'Utilities',              industry: 'Utilities — Regulated Electric' },
   'AMT':    { sector: 'Real Estate',            industry: 'REIT — Specialty' },
   'PLD':    { sector: 'Real Estate',            industry: 'REIT — Industrial' },
+  'APLE':   { sector: 'Real Estate',            industry: 'REIT — Hotel & Motel' },
+  'VICI':   { sector: 'Real Estate',            industry: 'REIT — Diversified' },
+  'O':      { sector: 'Real Estate',            industry: 'REIT — Retail' },
+  'REALTY': { sector: 'Real Estate',            industry: 'REIT — Retail' },
+  'SPG':    { sector: 'Real Estate',            industry: 'REIT — Retail' },
+  'AVB':    { sector: 'Real Estate',            industry: 'REIT — Residential' },
+  'EQR':    { sector: 'Real Estate',            industry: 'REIT — Residential' },
+  'PSA':    { sector: 'Real Estate',            industry: 'REIT — Specialty' },
+  'DLR':    { sector: 'Real Estate',            industry: 'REIT — Specialty' },
+  'WPC':    { sector: 'Real Estate',            industry: 'REIT — Diversified' },
+  'NNN':    { sector: 'Real Estate',            industry: 'REIT — Retail' },
+  'STAG':   { sector: 'Real Estate',            industry: 'REIT — Industrial' },
   // Swiss (.SW)
   'ABBN.SW':{ sector: 'Industrials',            industry: 'Specialty Industrial Machinery' },
   'ZURN.SW':{ sector: 'Financial Services',     industry: 'Insurance — Diversified' },
@@ -298,6 +310,29 @@ export async function fetchSectorData(ticker) {
       console.warn('Sector fetch timeout/fail:', e.message);
     }
   }
+
+  // Fallback: detecteaza sectorul din numele companiei (Yahoo nu a raspuns)
+  try {
+    const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
+    const r = await fetchWithTimeout(`https://corsproxy.io/?${encodeURIComponent(chartUrl)}`, 4000);
+    if (r.ok) {
+      const d    = await r.json();
+      const name = (d?.chart?.result?.[0]?.meta?.longName || '').toLowerCase();
+      const detected =
+        /reit|real estate|hospitality reit|hotel reit|property trust|mortgage trust/.test(name) ? 'Real Estate'
+      : /bank|bancorp|savings bank|financial corp/.test(name)                                   ? 'Financial Services'
+      : /insurance|assurance|reinsurance/.test(name)                                            ? 'Financial Services'
+      : /energy|oil|gas|petroleum|pipeline|midstream/.test(name)                               ? 'Energy'
+      : /utilities|electric power|water utility/.test(name)                                     ? 'Utilities'
+      : /pharma|biotech|therapeutics|biosciences|oncology/.test(name)                           ? 'Healthcare'
+      : /tobacco|cigarette|altria/.test(name)                                                   ? 'Consumer Defensive'
+      : null;
+      if (detected) {
+        const weights = SECTOR_WEIGHTS[detected] || SECTOR_WEIGHTS['Unknown'];
+        return { sector: detected, industry: detected, weights };
+      }
+    }
+  } catch (_) {}
 
   return { sector: 'Unknown', industry: 'Unknown', weights: SECTOR_WEIGHTS['Unknown'] };
 }

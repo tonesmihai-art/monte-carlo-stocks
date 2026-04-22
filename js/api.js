@@ -29,10 +29,11 @@ export async function fetchStockData(ticker) {
   const sharesRaw = meta.sharesOutstanding ?? null;
   const epsRaw    = meta.epsTrailingTwelveMonths ?? null;
   const peRaw     = meta.trailingPE ?? meta.forwardPE ?? null;
+  const sharesNum = _metaNum(sharesRaw);   // Yahoo poate returna {raw,fmt} — trebuie _metaNum
   const fundamentals = {
     eps:    _metaNum(epsRaw),
     pe:     _metaNum(peRaw),
-    shares: sharesRaw != null ? sharesRaw / 1e6 : null,
+    shares: sharesNum != null ? sharesNum / 1e6 : null,
   };
 
   return {
@@ -339,7 +340,7 @@ async function _fetchSEC(ticker) {
     return null;
   }
 
-  const [assets, cash, debt, opCF, capex, sharesN, sharesN2, epsDiluted, epsBasic] = await Promise.all([
+  const [assets, cash, debt, opCF, capex, sharesN, epsDiluted, epsBasic] = await Promise.all([
     getConcept('Assets', null),
     getConcept('CashAndCashEquivalentsAtCarryingValue', 'CashAndCashEquivalents'),
     getConcept('LongTermDebt', 'LongTermDebtNoncurrent'),
@@ -347,12 +348,11 @@ async function _fetchSEC(ticker) {
     getConcept('PaymentsToAcquirePropertyPlantAndEquipment',
                'PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'),
     getConcept('CommonStockSharesOutstanding', 'EntityCommonStockSharesOutstanding', 'shares'),
-    getConcept('CommonStockSharesOutstanding', null, 'shares'),   // retry fara altName
     getConcept('EarningsPerShareDiluted', 'IncomeLossFromContinuingOperationsPerDilutedShare', 'USD/shares'),
     getConcept('EarningsPerShareBasic',   'IncomeLossFromContinuingOperationsPerBasicShare',   'USD/shares'),
   ]);
 
-  const rawShares = sharesN ?? sharesN2 ?? null;
+  const rawShares = sharesN ?? null;
   const fcf  = opCF != null ? opCF - (capex ?? 0) : null;
   const eps  = epsDiluted ?? epsBasic ?? null;
   return {
@@ -472,6 +472,7 @@ export async function fetchValuationFundamentals(ticker) {
     growth:      quote.growth   ?? null,
     shares,
     fcfPerShare,
+    fcfTotal:    sec.fcfTotal   ?? null,   // FCF total in milioane $ (fallback pt calcul per-share)
     totalAssets: sec.totalAssets ?? null,
     cash:        sec.cash  ?? quote.cash  ?? null,
     debt:        sec.debt  ?? quote.debt  ?? null,

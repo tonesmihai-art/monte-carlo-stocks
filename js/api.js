@@ -249,7 +249,7 @@ const FMP_KEY     = 'U6KIewb4btX6jwjbChgY49mZxVHI30mG';   // ← pune cheia FMP 
 // ── Proxy Python propriu (Render.com) — fallback final, fara CORS ──
 // Dupa deploy pe Render, inlocuieste URL-ul de mai jos cu cel real
 // ex: 'https://monte-carlo-proxy.onrender.com'
-const MY_PROXY = 'https://monte-carlo-proxy.onrender.com';   // ← pune URL-ul dupa deploy
+const MY_PROXY = '';   // ← pune URL-ul dupa deploy
 
 // ── Convertor ticker Yahoo → Finnhub (pentru actiuni europene) ──
 // Yahoo:   ECMPA.AS  →  Finnhub: AMS:ECMPA
@@ -383,20 +383,15 @@ async function _fetchFMP(ticker) {
   console.log(`[FMP] Incerc pentru ${ticker} (stable API)...`);
 
   // Noul format: query param ?symbol= in loc de path /{ticker}
-  const [quoteRes, metricsRes, balRes] = await Promise.allSettled([
-    _fmpGet(`${base}/quote?symbol=${ticker}&apikey=${FMP_KEY}`)
-      .then(j => j?.[0] ?? null),
-    _fmpGet(`${base}/key-metrics?symbol=${ticker}&period=annual&limit=1&apikey=${FMP_KEY}`)
-      .then(j => j?.[0] ?? null),
-    _fmpGet(`${base}/balance-sheet-statement?symbol=${ticker}&period=annual&limit=1&apikey=${FMP_KEY}`)
-      .then(j => j?.[0] ?? null),
-  ]);
+  // Tier gratuit FMP include doar /stable/quote
+  // key-metrics si balance-sheet sunt paid — Finnhub + SEC acopera acele date
+  const q = await _fmpGet(`${base}/quote?symbol=${ticker}&apikey=${FMP_KEY}`)
+    .then(j => j?.[0] ?? null).catch(() => null);
+  const km  = null;
+  const bal = null;
 
-  const q   = quoteRes.status   === 'fulfilled' ? quoteRes.value   : null;
-  const km  = metricsRes.status === 'fulfilled' ? metricsRes.value : null;
-  const bal = balRes.status     === 'fulfilled' ? balRes.value     : null;
+  if (!q) return {};
 
-  if (!q && !km && !bal) return {};
 
   const toN = v => (v != null && isFinite(v)) ? v : null;
 

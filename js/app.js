@@ -362,7 +362,8 @@ async function runSimulation() {
             cash:        getValNum('cash'),
             debt:        getValNum('debt'),
             shares:      getValNum('shares'),
-            resultsHTML: $('val-results-grid')?.innerHTML || '',
+            resultsHTML:        $('val-results-grid')?.innerHTML          || '',
+            fundamentalComment: $('val-fundamental-comment')?.innerHTML  || '',
           };
 
           // ── Statistici Monte Carlo per perioada ───────

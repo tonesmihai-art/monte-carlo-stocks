@@ -172,23 +172,101 @@ window.openWatchlistCharts = function (idx) {
   const lb      = ensureLightbox();
   const content = $('wl-lb-content');
   const periods = [30, 90, 180, 360].filter(d => e.charts?.[d]);
+  const cp  = e.currentPrice ?? parseFloat(e.price) ?? 0;
+  const sym = e.currency === 'USD' ? '$' : (e.currency + ' ');
+
+  const fmtN = (v, d = 2) => v != null
+    ? v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
+    : '—';
+  const fmtDelta = v => (cp > 0 && v != null)
+    ? ` <span style="opacity:0.55;font-size:9.5px;">(${v >= cp ? '+' : ''}${(((v - cp) / cp) * 100).toFixed(1)}%)</span>`
+    : '';
+  const pRow = (lbl, val, col) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;
+                padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+      <span style="font-size:10px;color:rgba(255,255,255,0.42);">${lbl}</span>
+      <span style="font-size:10.5px;font-weight:700;color:${col || '#e0e0e0'};">
+        ${sym}${fmtN(val)}${fmtDelta(val)}</span>
+    </div>`;
+  const pRowPct = (lbl, val, col) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;
+                padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+      <span style="font-size:10px;color:rgba(255,255,255,0.42);">${lbl}</span>
+      <span style="font-size:10.5px;font-weight:700;color:${col || '#e0e0e0'};">
+        ${val != null ? val.toFixed(1) + '%' : '—'}</span>
+    </div>`;
+
+  // ── Sectiune statistici per coloana ─────────────────
+  const statsCol = days => {
+    const s = e.periodStats?.[days];
+    if (!s) return '';
+    const probColor = p => p >= 70 ? '#66bb6a' : p >= 50 ? '#ffee58' : '#ef5350';
+    return `
+      <div style="margin-top:8px;background:rgba(0,0,0,0.30);border-radius:7px;padding:8px 10px;">
+        <div style="font-size:9px;font-weight:600;color:rgba(255,255,255,0.28);letter-spacing:0.4px;
+                    text-transform:uppercase;margin-bottom:4px;">Statistici — ${days} zile</div>
+        ${pRow('Preț curent', cp, '#fff')}
+        ${pRow('Medie',       s.mean,   '#ffee58')}
+        ${pRow('P90 optimist', s.p90,   '#66bb6a')}
+        ${pRow('P10 pesimist', s.p10,   '#ef5350')}
+        ${pRow('Max simulat',  s.max,   '#4fc3f7')}
+        ${pRow('Min simulat',  s.min,   '#4fc3f7')}
+        <div style="height:3px;"></div>
+        ${pRowPct('Prob. profit',   s.probProfit, probColor(s.probProfit))}
+        ${pRowPct('Gain > 10%',     s.probGain10, probColor(s.probGain10))}
+        ${pRowPct('Loss > 10%',     s.probLoss10, s.probLoss10 < 10 ? '#66bb6a' : '#ef5350')}
+      </div>`;
+  };
+
+  // ── Sectiune valuare fundamentala ────────────────────
+  const vf = e.valFundamentals;
+  const hasFund = vf && (vf.eps != null || vf.pe != null || vf.fcf != null || vf.resultsHTML);
+  const fundHtml = hasFund ? `
+    <div style="margin-bottom:20px;padding:14px 16px;background:rgba(255,255,255,0.03);
+                border:1px solid rgba(255,255,255,0.09);border-radius:10px;">
+      <div style="font-size:10px;font-weight:600;color:rgba(255,255,255,0.30);
+                  letter-spacing:0.6px;text-transform:uppercase;margin-bottom:10px;">⚖️ Valuare Fundamentală</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 22px;font-size:12px;margin-bottom:12px;">
+        ${vf.eps    != null ? `<span><span style="color:rgba(255,255,255,0.42)">EPS: </span><b>${sym}${fmtN(vf.eps)}</b></span>` : ''}
+        ${vf.pe     != null ? `<span><span style="color:rgba(255,255,255,0.42)">P/E: </span><b>${fmtN(vf.pe, 1)}x</b></span>` : ''}
+        ${vf.fcf    != null ? `<span><span style="color:rgba(255,255,255,0.42)">FCF/acț: </span><b>${sym}${fmtN(vf.fcf)}</b></span>` : ''}
+        ${vf.growth != null ? `<span><span style="color:rgba(255,255,255,0.42)">Creștere: </span><b style="color:#ffee58">${fmtN(vf.growth, 1)}%</b></span>` : ''}
+        ${vf.wacc   != null ? `<span><span style="color:rgba(255,255,255,0.42)">WACC: </span><b>${fmtN(vf.wacc, 1)}%</b></span>` : ''}
+        ${vf.tgr    != null ? `<span><span style="color:rgba(255,255,255,0.42)">Rată term.: </span><b>${fmtN(vf.tgr, 1)}%</b></span>` : ''}
+        ${vf.assets != null ? `<span><span style="color:rgba(255,255,255,0.42)">Active: </span><b>${fmtN(vf.assets, 0)}M</b></span>` : ''}
+        ${vf.cash   != null ? `<span><span style="color:rgba(255,255,255,0.42)">Cash: </span><b>${fmtN(vf.cash, 0)}M</b></span>` : ''}
+        ${vf.debt   != null ? `<span><span style="color:rgba(255,255,255,0.42)">Datorii: </span><b>${fmtN(vf.debt, 0)}M</b></span>` : ''}
+      </div>
+      ${vf.resultsHTML ? `<div class="val-results-grid" style="pointer-events:none;opacity:0.92;">${vf.resultsHTML}</div>` : ''}
+    </div>` : '';
+
+  // ── Grid 4 coloane — grafice + statistici ─────────────
+  const gridHtml = periods.length ? `
+    <div style="font-size:10px;font-weight:600;color:rgba(255,255,255,0.28);
+                letter-spacing:0.6px;text-transform:uppercase;margin-bottom:10px;">
+      📊 Monte Carlo — ${e.ticker} · 10,000 simulări
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(${periods.length},1fr);gap:10px;">
+      ${periods.map(days => `
+        <div>
+          <div style="font-size:9.5px;font-weight:700;color:rgba(255,255,255,0.35);
+                      letter-spacing:0.6px;text-transform:uppercase;
+                      text-align:center;margin-bottom:5px;">${days} ZILE</div>
+          <img src="${e.charts[days].traj}" style="width:100%;border-radius:6px;display:block;margin-bottom:3px;" alt="Traj ${days}z">
+          <img src="${e.charts[days].hist}" style="width:100%;border-radius:6px;display:block;" alt="Hist ${days}z">
+          ${statsCol(days)}
+        </div>`).join('')}
+    </div>` : '<div style="color:rgba(255,255,255,0.3);font-size:13px;">Nu există grafice salvate.</div>';
 
   content.innerHTML = `
-    <div style="margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08);">
+    <div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.08);">
       <span style="font-size:22px;font-weight:700;color:#e0e0e0;">${e.ticker}</span>
       <span style="font-size:13px;color:rgba(255,255,255,0.40);margin-left:10px;">${e.name}</span><br>
       <span style="font-size:20px;font-weight:700;color:#4fc3f7;">${e.currency} ${e.price}</span>
       <span style="font-size:13px;color:rgba(255,255,255,0.40);margin-left:14px;">${e.date}${e.time ? ' · ' + e.time : ''}</span>
     </div>
-    ${periods.length ? periods.map(days => `
-      <div style="margin-bottom:22px;">
-        <div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.35);
-                    letter-spacing:0.6px;text-transform:uppercase;margin-bottom:8px;">${days} ZILE</div>
-        <div style="display:flex;gap:10px;align-items:flex-start;">
-          <img src="${e.charts[days].traj}" style="width:58%;border-radius:8px;display:block;" alt="Traj ${days}z">
-          <img src="${e.charts[days].hist}" style="width:39%;border-radius:8px;display:block;" alt="Hist ${days}z">
-        </div>
-      </div>`).join('') : '<div style="color:rgba(255,255,255,0.3);font-size:13px;">Nu există grafice salvate.</div>'}`;
+    ${fundHtml}
+    ${gridHtml}`;
 
   lb.style.display = 'block';
   lb.scrollTop = 0;
@@ -336,17 +414,45 @@ export function exportWatchlistHTML() {
       </div>
       <div class="pills">${e.pills.map(p => `<span class="pill">${p}</span>`).join('')}</div>
       ${e.comment ? `<div class="comment">${e.comment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}</div>` : ''}
+      ${(() => {
+        const vf = e.valFundamentals;
+        const fmtN = (v, d=2) => v != null ? v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}) : '—';
+        const sym = e.currency === 'USD' ? '$' : e.currency + ' ';
+        if (!vf || (vf.eps == null && vf.pe == null && vf.fcf == null)) return '';
+        return `<div style="margin:10px 0;padding:10px 14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;font-size:11.5px;">
+          <div style="font-size:9.5px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">⚖️ Valuare Fundamentală</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px 18px;">
+            ${vf.eps!=null?`<span><span style="color:rgba(255,255,255,0.42)">EPS: </span><b>${sym}${fmtN(vf.eps)}</b></span>`:''}
+            ${vf.pe!=null?`<span><span style="color:rgba(255,255,255,0.42)">P/E: </span><b>${fmtN(vf.pe,1)}x</b></span>`:''}
+            ${vf.fcf!=null?`<span><span style="color:rgba(255,255,255,0.42)">FCF/acț: </span><b>${sym}${fmtN(vf.fcf)}</b></span>`:''}
+            ${vf.growth!=null?`<span><span style="color:rgba(255,255,255,0.42)">Creștere: </span><b>${fmtN(vf.growth,1)}%</b></span>`:''}
+            ${vf.wacc!=null?`<span><span style="color:rgba(255,255,255,0.42)">WACC: </span><b>${fmtN(vf.wacc,1)}%</b></span>`:''}
+          </div>
+        </div>`;
+      })()}
       ${e.charts ? `
-        <div class="charts-grid">
-          ${[30, 90, 180, 360].filter(d => e.charts[d]).map(days => `
-            <div class="chart-period">
+        <div class="charts-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
+          ${[30, 90, 180, 360].filter(d => e.charts[d]).map(days => {
+            const s = e.periodStats?.[days];
+            const cp = e.currentPrice ?? parseFloat(e.price) ?? 0;
+            const sym = e.currency === 'USD' ? '$' : e.currency + ' ';
+            const fN = (v,d=2) => v!=null?v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+            const delta = v => (cp>0&&v!=null)?` (${v>=cp?'+':''}${(((v-cp)/cp)*100).toFixed(1)}%)`:'';
+            return `<div class="chart-period" style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;">
               <div class="period-label">${days} ZILE</div>
-              <div class="chart-row">
+              <div class="chart-row" style="margin-bottom:8px;">
                 <img src="${e.charts[days].traj}" alt="Traj ${days}z">
                 <img src="${e.charts[days].hist}" alt="Hist ${days}z">
               </div>
-            </div>
-          `).join('')}
+              ${s ? `<table style="width:100%;font-size:10px;border-collapse:collapse;">
+                <tr><td style="color:rgba(255,255,255,0.4)">Preț curent</td><td style="text-align:right;font-weight:700">${sym}${fN(cp)}</td></tr>
+                <tr><td style="color:rgba(255,255,255,0.4)">Medie</td><td style="text-align:right;color:#ffee58;font-weight:700">${sym}${fN(s.mean)}${delta(s.mean)}</td></tr>
+                <tr><td style="color:rgba(255,255,255,0.4)">P90 optimist</td><td style="text-align:right;color:#66bb6a;font-weight:700">${sym}${fN(s.p90)}${delta(s.p90)}</td></tr>
+                <tr><td style="color:rgba(255,255,255,0.4)">P10 pesimist</td><td style="text-align:right;color:#ef5350;font-weight:700">${sym}${fN(s.p10)}${delta(s.p10)}</td></tr>
+                <tr><td style="color:rgba(255,255,255,0.4)">Prob. profit</td><td style="text-align:right;color:#66bb6a;font-weight:700">${s.probProfit?.toFixed(1)}%</td></tr>
+              </table>` : ''}
+            </div>`;
+          }).join('')}
         </div>
       ` : ''}
     </div>`;

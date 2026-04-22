@@ -344,23 +344,60 @@ async function _fetchSEC(ticker) {
   };
 }
 
-// ── Yahoo v7/quote — EPS + growth ────────────────────
-async function _fetchYahooQuote(ticker) {
-  const urls = [
+// ── Yahoo quoteSummary — date fundamentale complete ───
+async function _fetchYahooFundamentals(ticker) {
+  // Pas 1: quoteSummary — cel mai complet (FCF, cash, debt, PE, growth, EPS)
+  const modules = 'financialData,defaultKeyStatistics,summaryDetail';
+  const summaryUrls = [
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
+  ];
+  for (const url of summaryUrls) {
+    for (const px of _YPX) {
+      try {
+        const json = await _yGet(px(url), 9000);
+        if (typeof json !== 'object') continue;
+        const r = json?.quoteSummary?.result?.[0];
+        if (!r) continue;
+        const fd = r.financialData        || {};
+        const ks = r.defaultKeyStatistics || {};
+        const sd = r.summaryDetail        || {};
+
+        const sharesRaw = ks.sharesOutstanding ?? null;
+        const fcfTotal  = fd.freeCashflow      ?? null;
+        const fcfPS     = (fcfTotal != null && sharesRaw > 0) ? fcfTotal / sharesRaw : null;
+
+        return {
+          eps:         ks.trailingEps   ?? null,
+          pe:          sd.trailingPE    ?? ks.trailingPE ?? null,
+          growth:      fd.earningsGrowth != null ? fd.earningsGrowth * 100
+                     : fd.revenueGrowth  != null ? fd.revenueGrowth  * 100 : null,
+          shares:      sharesRaw != null ? sharesRaw / 1e6 : null,
+          fcfPerShare: fcfPS,
+          cash:        fd.totalCash != null ? fd.totalCash / 1e6 : null,
+          debt:        fd.totalDebt != null ? fd.totalDebt / 1e6 : null,
+        };
+      } catch (_) {}
+    }
+  }
+
+  // Pas 2: fallback — endpoint quote v7/v8 (mai sarac, fara FCF/cash/debt)
+  const quoteUrls = [
     `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
     `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&formatted=false`,
     `https://query2.finance.yahoo.com/v8/finance/quote?symbols=${ticker}`,
     `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${ticker}`,
   ];
-  for (const url of urls) {
+  for (const url of quoteUrls) {
     for (const px of _YPX) {
       try {
         const json = await _yGet(px(url), 7000);
         if (typeof json !== 'object') continue;
-        const q = json?.quoteResponse?.result?.[0] ?? json?.quoteSummary?.result?.[0];
+        const q = json?.quoteResponse?.result?.[0];
         if (!q) continue;
         return {
           eps:    q.epsTrailingTwelveMonths ?? q.trailingEps ?? null,
+          pe:     q.trailingPE ?? null,
           growth: q.earningsGrowth != null ? q.earningsGrowth * 100
                 : q.revenueGrowth  != null ? q.revenueGrowth  * 100 : null,
           shares: q.sharesOutstanding != null ? q.sharesOutstanding / 1e6 : null,
@@ -374,21 +411,22 @@ async function _fetchYahooQuote(ticker) {
 export async function fetchValuationFundamentals(ticker) {
   const isUS = !ticker.includes('.') && !ticker.includes('-');
   const tasks = isUS
-    ? [_fetchSEC(ticker), _fetchYahooQuote(ticker)]
-    : [Promise.resolve({}), _fetchYahooQuote(ticker)];
+    ? [_fetchSEC(ticker), _fetchYahooFundamentals(ticker)]
+    : [Promise.resolve({}), _fetchYahooFundamentals(ticker)];
 
   const [secR, quoteR] = await Promise.allSettled(tasks);
   const sec   = secR.status   === 'fulfilled' ? secR.value   : {};
   const quote = quoteR.status === 'fulfilled' ? quoteR.value : {};
 
   const result = {
-    eps:         quote.eps                  ?? null,
-    growth:      quote.growth               ?? null,
-    shares:      sec.shares   ?? quote.shares ?? null,
-    fcfPerShare: sec.fcfPerShare            ?? null,
-    totalAssets: sec.totalAssets            ?? null,
-    cash:        sec.cash                   ?? null,
-    debt:        sec.debt                   ?? null,
+    eps:         quote.eps                            ?? null,
+    pe:          quote.pe                             ?? null,
+    growth:      quote.growth                         ?? null,
+    shares:      sec.shares      ?? quote.shares      ?? null,
+    fcfPerShare: sec.fcfPerShare ?? quote.fcfPerShare ?? null,
+    totalAssets: sec.totalAssets                      ?? null,
+    cash:        sec.cash        ?? quote.cash        ?? null,
+    debt:        sec.debt        ?? quote.debt        ?? null,
   };
   if (Object.values(result).every(v => v == null)) throw new Error('Date indisponibile');
   return result;

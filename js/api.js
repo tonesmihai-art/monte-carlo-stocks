@@ -2,6 +2,13 @@
 //  API.JS — Fetch date: Yahoo Finance, Nasdaq IV, SEC EDGAR
 // ─────────────────────────────────────────────────────
 
+// ── Helper: extrage numar indiferent daca Yahoo da plain value sau {raw,fmt} ──
+function _metaNum(v) {
+  if (v == null) return null;
+  if (typeof v === 'object') return (v.raw != null && isFinite(v.raw)) ? v.raw : null;
+  return isFinite(v) ? v : null;
+}
+
 // ── Yahoo Finance via CORS proxy ─────────────────────
 export async function fetchStockData(ticker) {
   const url   = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`;
@@ -21,8 +28,10 @@ export async function fetchStockData(ticker) {
 
   const sharesRaw = meta.sharesOutstanding ?? null;
   const epsRaw    = meta.epsTrailingTwelveMonths ?? null;
+  const peRaw     = meta.trailingPE ?? meta.forwardPE ?? null;
   const fundamentals = {
-    eps:    (epsRaw != null && typeof epsRaw === 'object') ? epsRaw.raw ?? null : epsRaw,
+    eps:    _metaNum(epsRaw),
+    pe:     _metaNum(peRaw),
     shares: sharesRaw != null ? sharesRaw / 1e6 : null,
   };
 
@@ -317,7 +326,7 @@ async function _fetchSEC(ticker) {
 
     for (const url of urls) {
       try {
-        const json = await _robustGet(url, 8000);
+        const json = await _robustGet(url, 5000);
         const val  = _secLatest(json, unit);
         if (val != null) return val;
       } catch (_) {}
@@ -365,7 +374,7 @@ async function _fetchYahooFundamentals(ticker) {
   for (const url of summaryUrls) {
     for (const px of _YPX) {
       try {
-        const json = await _yGet(px(url), 9000);
+        const json = await _yGet(px(url), 4000);  // timeout scurt — v10 necesita crumb
         if (typeof json !== 'object') continue;
         const r = json?.quoteSummary?.result?.[0];
         if (!r) continue;
@@ -408,7 +417,7 @@ async function _fetchYahooFundamentals(ticker) {
   for (const url of quoteUrls) {
     for (const px of _YPX) {
       try {
-        const json = await _yGet(px(url), 7000);
+        const json = await _yGet(px(url), 5000);
         if (typeof json !== 'object') continue;
         const q = json?.quoteResponse?.result?.[0];
         if (!q) continue;

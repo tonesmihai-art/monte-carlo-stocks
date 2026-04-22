@@ -238,6 +238,13 @@ window.openWatchlistCharts = function (idx) {
         ${vf.debt   != null ? `<span><span style="color:rgba(255,255,255,0.42)">Datorii: </span><b>${fmtN(vf.debt, 0)}M</b></span>` : ''}
       </div>
       ${vf.resultsHTML ? `<div class="val-results-grid" style="pointer-events:none;opacity:0.92;">${vf.resultsHTML}</div>` : ''}
+      ${vf.fundamentalComment ? `
+        <div style="margin-top:12px;padding:12px 14px;
+                    background:linear-gradient(135deg,rgba(18,18,31,0.95),rgba(26,26,46,0.95));
+                    border:1px solid rgba(124,106,247,0.22);border-radius:8px;
+                    font-size:11px;line-height:1.7;color:#e8e8f0;">
+          ${vf.fundamentalComment}
+        </div>` : ''}
     </div>` : '';
 
   // ── Grid 4 coloane — grafice + statistici ─────────────

@@ -20,8 +20,9 @@ export async function fetchStockData(ticker) {
   const meta = result.meta;
 
   const sharesRaw = meta.sharesOutstanding ?? null;
+  const epsRaw    = meta.epsTrailingTwelveMonths ?? null;
   const fundamentals = {
-    eps:    meta.epsTrailingTwelveMonths ?? null,
+    eps:    (epsRaw != null && typeof epsRaw === 'object') ? epsRaw.raw ?? null : epsRaw,
     shares: sharesRaw != null ? sharesRaw / 1e6 : null,
   };
 
@@ -344,6 +345,13 @@ async function _fetchSEC(ticker) {
   };
 }
 
+// ── Helper: Yahoo returneaza uneori {raw,fmt} chiar si cu formatted=false ──
+function _yv(v) {
+  if (v == null) return null;
+  if (typeof v === 'object') return v.raw ?? null;
+  return typeof v === 'number' ? v : null;
+}
+
 // ── Yahoo quoteSummary — date fundamentale complete ───
 async function _fetchYahooFundamentals(ticker) {
   // Pas 1: quoteSummary — cel mai complet (FCF, cash, debt, PE, growth, EPS)
@@ -351,6 +359,8 @@ async function _fetchYahooFundamentals(ticker) {
   const summaryUrls = [
     `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
     `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
   ];
   for (const url of summaryUrls) {
     for (const px of _YPX) {
@@ -363,20 +373,27 @@ async function _fetchYahooFundamentals(ticker) {
         const ks = r.defaultKeyStatistics || {};
         const sd = r.summaryDetail        || {};
 
-        const sharesRaw = ks.sharesOutstanding ?? null;
-        const fcfTotal  = fd.freeCashflow      ?? null;
+        const sharesRaw = _yv(ks.sharesOutstanding);
+        const fcfTotal  = _yv(fd.freeCashflow);
         const fcfPS     = (fcfTotal != null && sharesRaw > 0) ? fcfTotal / sharesRaw : null;
 
-        return {
-          eps:         ks.trailingEps   ?? null,
-          pe:          sd.trailingPE    ?? ks.trailingPE ?? null,
-          growth:      fd.earningsGrowth != null ? fd.earningsGrowth * 100
-                     : fd.revenueGrowth  != null ? fd.revenueGrowth  * 100 : null,
-          shares:      sharesRaw != null ? sharesRaw / 1e6 : null,
-          fcfPerShare: fcfPS,
-          cash:        fd.totalCash != null ? fd.totalCash / 1e6 : null,
-          debt:        fd.totalDebt != null ? fd.totalDebt / 1e6 : null,
-        };
+        const eps    = _yv(ks.trailingEps);
+        const pe     = _yv(sd.trailingPE) ?? _yv(sd.forwardPE) ?? _yv(ks.trailingPE) ?? null;
+        const growth = _yv(fd.earningsGrowth) != null ? _yv(fd.earningsGrowth) * 100
+                     : _yv(fd.revenueGrowth)  != null ? _yv(fd.revenueGrowth)  * 100 : null;
+
+        // returnam doar daca avem cel putin un camp util
+        if (eps != null || pe != null || fcfTotal != null) {
+          return {
+            eps,
+            pe,
+            growth,
+            shares:      sharesRaw != null ? sharesRaw / 1e6 : null,
+            fcfPerShare: fcfPS,
+            cash:        _yv(fd.totalCash) != null ? _yv(fd.totalCash) / 1e6 : null,
+            debt:        _yv(fd.totalDebt) != null ? _yv(fd.totalDebt) / 1e6 : null,
+          };
+        }
       } catch (_) {}
     }
   }
@@ -396,11 +413,11 @@ async function _fetchYahooFundamentals(ticker) {
         const q = json?.quoteResponse?.result?.[0];
         if (!q) continue;
         return {
-          eps:    q.epsTrailingTwelveMonths ?? q.trailingEps ?? null,
-          pe:     q.trailingPE ?? null,
-          growth: q.earningsGrowth != null ? q.earningsGrowth * 100
-                : q.revenueGrowth  != null ? q.revenueGrowth  * 100 : null,
-          shares: q.sharesOutstanding != null ? q.sharesOutstanding / 1e6 : null,
+          eps:    _yv(q.epsTrailingTwelveMonths) ?? _yv(q.trailingEps) ?? null,
+          pe:     _yv(q.trailingPE) ?? null,
+          growth: _yv(q.earningsGrowth) != null ? _yv(q.earningsGrowth) * 100
+                : _yv(q.revenueGrowth)  != null ? _yv(q.revenueGrowth)  * 100 : null,
+          shares: _yv(q.sharesOutstanding) != null ? _yv(q.sharesOutstanding) / 1e6 : null,
         };
       } catch (_) {}
     }

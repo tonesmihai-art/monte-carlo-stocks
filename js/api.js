@@ -335,7 +335,7 @@ async function _fetchSEC(ticker) {
 
     for (const url of urls) {
       try {
-        const json = await _robustGet(url, 5000);
+        const json = await _robustGet(url, 12000);  // 12s — fișiere mari pt companii mari (VZ, MSFT)
         const val  = _secLatest(json, unit);
         if (val != null) return val;
       } catch (_) {}
@@ -381,6 +381,10 @@ async function _fetchYahooFundamentals(ticker) {
   // Pas 1: quoteSummary — cel mai complet (FCF, cash, debt, PE, growth, EPS)
   const modules = 'financialData,defaultKeyStatistics,summaryDetail';
   const summaryUrls = [
+    // v11 — mai nou, uneori nu necesita crumb
+    `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
+    `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
+    // v10 — necesita crumb de obicei, dar incercam
     `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
     `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`,
     `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
@@ -436,12 +440,13 @@ async function _fetchYahooFundamentals(ticker) {
         if (typeof json !== 'object') continue;
         const q = json?.quoteResponse?.result?.[0];
         if (!q) continue;
+        const sharesQ = _yv(q.sharesOutstanding) ?? _yv(q.impliedSharesOutstanding) ?? null;
         return {
           eps:    _yv(q.epsTrailingTwelveMonths) ?? _yv(q.trailingEps) ?? null,
           pe:     _yv(q.trailingPE) ?? null,
           growth: _yv(q.earningsGrowth) != null ? _yv(q.earningsGrowth) * 100
                 : _yv(q.revenueGrowth)  != null ? _yv(q.revenueGrowth)  * 100 : null,
-          shares: _yv(q.sharesOutstanding) != null ? _yv(q.sharesOutstanding) / 1e6 : null,
+          shares: sharesQ != null ? sharesQ / 1e6 : null,
         };
       } catch (_) {}
     }

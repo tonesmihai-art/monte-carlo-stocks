@@ -47,8 +47,13 @@ function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shar
     : null;
 
   let valDCF = null;
+  let growthCapped = false;
   if (fcf > 0 && growth != null && wacc != null && tgr != null && wacc > tgr) {
-    const g = growth / 100, r = wacc / 100, t = tgr / 100;
+    // Cap growth la 35% maxim — rate peste 35% distorsioneaza masiv DCF-ul
+    const rawG = growth / 100;
+    const g    = Math.min(rawG, 0.35);
+    if (rawG > 0.35) growthCapped = true;
+    const r = wacc / 100, t = tgr / 100;
     let dcfSum = 0;
     for (let n = 1; n <= 10; n++) {
       dcfSum += (fcf * Math.pow(1 + g, n)) / Math.pow(1 + r, n);
@@ -68,7 +73,7 @@ function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shar
     const totalW = avail.reduce((s, m) => s + m.w, 0);
     weighted = avail.reduce((s, m) => s + m.val * m.w / totalW, 0);
   }
-  return { valEPS, valFCF, valNAV, valDCF, weighted, w };
+  return { valEPS, valFCF, valNAV, valDCF, weighted, w, growthCapped };
 }
 
 // ── Actualizeaza UI dupa orice modificare input ───────
@@ -84,14 +89,42 @@ export function updateValuare() {
   const currency  = priceEl ? (priceEl.dataset.currency || 'USD') : 'USD';
   const sym       = currency === 'USD' ? '$' : currency + ' ';
 
-  const { valEPS, valFCF, valNAV, valDCF, weighted, w } = calcValuare({
+  const inputs = {
     eps: getNum('eps'), pe: getNum('pe'), fcf: getNum('fcf'),
     growth: getNum('growth'), wacc: getNum('wacc'), tgr: getNum('tgr'),
     assets: getNum('assets'), cash: getNum('cash'), debt: getNum('debt'),
-    shares: getNum('shares'), sector,
-  });
+    shares: getNum('shares'),
+  };
+  const { valEPS, valFCF, valNAV, valDCF, weighted, w, growthCapped } = calcValuare({ ...inputs, sector });
 
   function fv(v) { return v != null ? `${sym}${v.toFixed(2)}` : '—'; }
+
+  // ── Formule pentru fiecare metoda ────────────────────
+  const fmtN = (v, d=2) => v != null ? v.toFixed(d) : '—';
+  const formulaEPS = inputs.eps > 0 && inputs.pe > 0
+    ? `EPS ${sym}${fmtN(inputs.eps)} × P/E ${fmtN(inputs.pe,1)} = ${fv(valEPS)}`
+    : 'Necesita EPS si P/E';
+  const formulaFCF = inputs.fcf > 0 && inputs.pe > 0
+    ? `FCF/acț ${sym}${fmtN(inputs.fcf)} × P/E ${fmtN(inputs.pe,1)} = ${fv(valFCF)}`
+    : 'Necesita FCF si P/E';
+  const formulaNAV = inputs.assets != null && inputs.cash != null && inputs.debt != null && inputs.shares > 0
+    ? `(Active ${sym}${fmtN(inputs.assets,0)}M + Cash ${sym}${fmtN(inputs.cash,0)}M − Datorii ${sym}${fmtN(inputs.debt,0)}M) ÷ ${fmtN(inputs.shares,0)}M acț = ${fv(valNAV)}`
+    : 'Necesita active, cash, datorii, acțiuni';
+  const gUsed = inputs.growth != null ? Math.min(inputs.growth, 35) : null;
+  const formulaDCF = inputs.fcf > 0 && inputs.growth != null && inputs.wacc != null && inputs.tgr != null
+    ? `FCF ${sym}${fmtN(inputs.fcf)} × (1+${fmtN(gUsed,1)}%)^n / (1+${fmtN(inputs.wacc,1)}%)^n, 10 ani + val. terminală (TGR ${fmtN(inputs.tgr,1)}%)`
+      + (growthCapped ? ` ⚠ creștere limitată la 35% (input: ${fmtN(inputs.growth,1)}%)` : '')
+    : 'Necesita FCF, creștere, WACC, rată terminală';
+
+  function card(label, val, formula, weight) {
+    return `
+      <div class="val-method-card" title="${formula.replace(/"/g,"'")}">
+        <div class="vm-label">${label}</div>
+        <div class="vm-val">${fv(val)}</div>
+        <div class="vm-formula">${formula}</div>
+        <div class="vm-weight">Pondere ${(weight * 100).toFixed(0)}%</div>
+      </div>`;
+  }
 
   let marginHtml = '';
   if (weighted != null && curPrice > 0) {
@@ -120,26 +153,10 @@ export function updateValuare() {
   }
 
   grid.innerHTML = `
-    <div class="val-method-card">
-      <div class="vm-label">Val. PE</div>
-      <div class="vm-val">${fv(valEPS)}</div>
-      <div class="vm-weight">Pondere ${(w.eps * 100).toFixed(0)}%</div>
-    </div>
-    <div class="val-method-card">
-      <div class="vm-label">Val. FCF</div>
-      <div class="vm-val">${fv(valFCF)}</div>
-      <div class="vm-weight">Pondere ${(w.fcf * 100).toFixed(0)}%</div>
-    </div>
-    <div class="val-method-card">
-      <div class="vm-label">Val. NAV</div>
-      <div class="vm-val">${fv(valNAV)}</div>
-      <div class="vm-weight">Pondere ${(w.nav * 100).toFixed(0)}%</div>
-    </div>
-    <div class="val-method-card">
-      <div class="vm-label">Val. DCF</div>
-      <div class="vm-val">${fv(valDCF)}</div>
-      <div class="vm-weight">Pondere ${(w.dcf * 100).toFixed(0)}%</div>
-    </div>
+    ${card('Val. PE',  valEPS, formulaEPS, w.eps)}
+    ${card('Val. FCF', valFCF, formulaFCF, w.fcf)}
+    ${card('Val. NAV', valNAV, formulaNAV, w.nav)}
+    ${card('Val. DCF', valDCF, formulaDCF, w.dcf)}
     <div class="val-weighted-card">
       <div class="vm-label">Val. Medie Ponderată</div>
       <div class="vm-val">${fv(weighted)}</div>
@@ -364,7 +381,18 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
       setValInput('pe', peVal, 1);
     }
 
-    statusEl.textContent = '✔ Date SEC + Yahoo · WACC, rata terminală — completează manual';
+    // Afiseaza sursa per camp
+    const s = d.sources || {};
+    const srcGroups = {};
+    Object.entries(s).forEach(([field, src]) => {
+      if (!src) return;
+      if (!srcGroups[src]) srcGroups[src] = [];
+      srcGroups[src].push(field);
+    });
+    const srcStr = Object.entries(srcGroups)
+      .map(([src, fields]) => `${src}: ${fields.join(', ')}`)
+      .join(' · ');
+    statusEl.textContent = `✔ ${srcStr || 'Date disponibile'} · WACC, TGR — completează manual`;
     statusEl.style.color = 'rgba(102,187,106,0.65)';
     updateValuare();
   }).catch(err => {

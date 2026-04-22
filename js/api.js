@@ -246,6 +246,11 @@ export function blendSigma(sigmaHist, ivDaily, days) {
 const FINNHUB_KEY = 'd7k8arpr01qn1u2gjttgd7k8arpr01qn1u2gjtu0';   // ← pune cheia ta aici (string)
 const FMP_KEY     = 'U6KIewb4btX6jwjbChgY49mZxVHI30mG';   // ← pune cheia FMP (https://financialmodelingprep.com/developer/docs) — tier gratuit 250 req/zi
 
+// ── Proxy Python propriu (Render.com) — fallback final, fara CORS ──
+// Dupa deploy pe Render, inlocuieste URL-ul de mai jos cu cel real
+// ex: 'https://monte-carlo-proxy.onrender.com'
+const MY_PROXY = 'https://monte-carlo-proxy.onrender.com';   // ← pune URL-ul dupa deploy
+
 // ── Convertor ticker Yahoo → Finnhub (pentru actiuni europene) ──
 // Yahoo:   ECMPA.AS  →  Finnhub: AMS:ECMPA
 // Yahoo:   BMW.DE    →  Finnhub: XETRA:BMW
@@ -436,7 +441,9 @@ const _YPX = [
   u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-];
+  // proxy-ul tau Python — ultimul fallback, cel mai de incredere
+  u => MY_PROXY ? `${MY_PROXY}/proxy?url=${encodeURIComponent(u)}` : null,
+].filter(Boolean);
 
 async function _robustGet(url, ms = 10000) {
   try {

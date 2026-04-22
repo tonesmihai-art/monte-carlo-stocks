@@ -108,6 +108,17 @@ export function updateValuare() {
 
   const grid = $('val-results-grid');
   if (!grid) return;
+
+  // ── Comentariu calitativ fundamental + tehnic ────────
+  const commentEl = ensureFundComment();
+  if (commentEl) {
+    const margin = (weighted != null && curPrice > 0)
+      ? (weighted - curPrice) / curPrice * 100
+      : null;
+    commentEl.innerHTML = generateFundamentalComment(weighted, curPrice, margin, sym);
+    commentEl.style.display = 'block';
+  }
+
   grid.innerHTML = `
     <div class="val-method-card">
       <div class="vm-label">Val. PE</div>
@@ -146,6 +157,117 @@ window.toggleValuare = function () {
   icon.textContent = isOpen ? '▼ Extinde' : '▲ Restrânge';
 };
 
+// ── Context tehnic (MA60, drift, sigma) ──────────────
+let _techCtx = {};
+
+// ── Comentariu calitativ fundamental + tehnic ─────────
+
+function ensureFundComment() {
+  let el = document.getElementById('val-fundamental-comment');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'val-fundamental-comment';
+  el.style.display = 'none';
+  // Insereaza dupa val-results-grid (sau la finalul val-content)
+  const grid = document.getElementById('val-results-grid');
+  if (grid?.parentNode) grid.parentNode.appendChild(el);
+  else document.getElementById('val-content')?.appendChild(el);
+  return el;
+}
+
+function generateFundamentalComment(weighted, curPrice, margin, sym) {
+  const { deviationPct, drift, sigma, mean50 } = _techCtx;
+  const hasTech = deviationPct != null;
+
+  // ── Verdict fundamental ──────────────────────────────
+  let fundLabel, fundColor, fundAdvice;
+  if (weighted == null || curPrice <= 0) {
+    fundLabel  = 'Valuare insuficientă';
+    fundColor  = 'rgba(255,255,255,0.4)';
+    fundAdvice = 'Completează câmpurile EPS/FCF/WACC pentru a calcula valuarea intrinsecă.';
+  } else if (margin > 20) {
+    fundLabel  = '✔ Subapreciată — potențial de creștere';
+    fundColor  = '#66bb6a';
+    fundAdvice = `Prețul curent (${sym}${curPrice.toFixed(2)}) este cu <strong style="color:#66bb6a">${margin.toFixed(1)}%</strong> sub valoarea fundamentală estimată (${sym}${weighted.toFixed(2)}). Compania pare <em>subapreciată</em> — un candidat solid dacă fundamentele sunt stabile.`;
+  } else if (margin > 0) {
+    fundLabel  = '≈ Corect evaluată';
+    fundColor  = '#ffee58';
+    fundAdvice = `Prețul curent (${sym}${curPrice.toFixed(2)}) este aproape de valoarea fundamentală estimată (${sym}${weighted.toFixed(2)}). Marja de siguranță este redusă (${margin.toFixed(1)}%) — intrarea depinde în mare măsură de timing-ul tehnic.`;
+  } else {
+    fundLabel  = '✘ Supraevaluată — risc la prețul curent';
+    fundColor  = '#ef5350';
+    fundAdvice = `Prețul curent (${sym}${curPrice.toFixed(2)}) depășește cu <strong style="color:#ef5350">${Math.abs(margin).toFixed(1)}%</strong> valoarea fundamentală estimată (${sym}${weighted.toFixed(2)}). Riscul de corecție este ridicat dacă așteptările de creștere nu se materializează.`;
+  }
+
+  // ── Timing tehnic ────────────────────────────────────
+  let techHtml = '';
+  if (hasTech) {
+    const dev   = deviationPct;
+    const sigAnn = (sigma ?? 0) * Math.sqrt(252) * 100;
+    let techLabel, techColor, techAdvice;
+
+    if (dev < -15) {
+      techLabel  = '📉 Preț mult sub MA60 — zonă de acumulare';
+      techColor  = '#66bb6a';
+      techAdvice = `Prețul se află cu <strong style="color:#66bb6a">${Math.abs(dev).toFixed(1)}%</strong> sub media mobilă pe 60 de zile — semnal de <em>oversold</em>. Statistic, aceasta este o fereastră favorabilă de intrare pentru investitorii pe termen mediu/lung.`;
+    } else if (dev < -5) {
+      techLabel  = '📊 Preț ușor sub MA60 — condiții favorabile';
+      techColor  = '#a5d6a7';
+      techAdvice = `Prețul este cu ${Math.abs(dev).toFixed(1)}% sub MA60 — ușor corectat față de medie. Condiții tehnice favorabile pentru o intrare incrementală.`;
+    } else if (dev <= 5) {
+      techLabel  = '➡ Preț la MA60 — neutral tehnic';
+      techColor  = '#ffee58';
+      techAdvice = `Prețul se tranzacționează în jurul mediei mobile pe 60 de zile (±${Math.abs(dev).toFixed(1)}%). Nu există un semnal tehnic clar — intrarea e posibilă, dar fără avantaj de pricing față de tendința medie.`;
+    } else if (dev <= 15) {
+      techLabel  = '📈 Preț ușor peste MA60 — urmărește o corecție';
+      techColor  = '#ffa726';
+      techAdvice = `Prețul este cu ${dev.toFixed(1)}% peste MA60. Momentul tehnic nu e optim pentru o intrare nouă — ideal ar fi să aștepți o retragere spre medie sau spre un suport tehnic clar.`;
+    } else {
+      techLabel  = '🔺 Preț extins peste MA60 — evită intrarea acum';
+      techColor  = '#ef5350';
+      techAdvice = `Prețul este cu <strong style="color:#ef5350">${dev.toFixed(1)}%</strong> peste MA60 — extins tehnic. Intrarea acum crește riscul de a cumpăra la vârf local. Strategia recomandată: <em>așteaptă o corecție semnificativă</em>.`;
+    }
+
+    // ── Pret de intrare sugerat ──────────────────────────
+    let entryPriceHtml = '';
+    if (curPrice > 0 && mean50 != null && mean50 > 0) {
+      const entryMA     = mean50;                          // MA60 = entry tehnic ideal
+      const entryFund   = weighted != null ? Math.min(weighted * 0.97, curPrice * 0.93) : null; // -3% sub fundamental
+      const bestEntry   = entryFund != null
+        ? Math.min(entryMA, entryFund)
+        : entryMA;
+      const discountPct = ((curPrice - bestEntry) / curPrice * 100).toFixed(1);
+      if (bestEntry < curPrice) {
+        entryPriceHtml = `
+          <div class="vfc-entry-box">
+            <strong>🎯 Preț țintă de intrare</strong>
+            Zona favorabilă: <span style="color:#66bb6a;font-weight:700">${sym}${bestEntry.toFixed(2)}</span>
+            ${entryFund != null ? ` &nbsp;·&nbsp; MA60: ${sym}${entryMA.toFixed(2)} &nbsp;·&nbsp; −3% sub fundamental: ${sym}${entryFund.toFixed(2)}` : `&nbsp;·&nbsp; (MA60)`}
+            <span style="color:#ffa726"> ≈ −${discountPct}% față de prețul actual</span>
+          </div>`;
+      }
+    }
+
+    techHtml = `
+      <div class="vfc-row" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.07)">
+        <span style="color:${techColor};font-weight:600">${techLabel}</span><br>
+        <span style="color:rgba(255,255,255,0.75)">${techAdvice}</span>
+        ${entryPriceHtml}
+      </div>
+      <div class="vfc-row" style="margin-top:6px;font-size:10px;color:rgba(255,255,255,0.4)">
+        Strategie: alegi compania după <em>fundamentale</em>, intri tehnic când prețul e jos — MA60 deviere ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}% · vol ${sigAnn.toFixed(0)}%/an
+      </div>`;
+  }
+
+  return `
+    <div class="vfc-title">📋 Analiză Fundamentală + Timing Tehnic</div>
+    <div class="vfc-row">
+      <span style="color:${fundColor};font-weight:600">${fundLabel}</span>
+    </div>
+    <div class="vfc-row" style="color:rgba(255,255,255,0.8)">${fundAdvice}</div>
+    ${techHtml}`;
+}
+
 // ── Seteaza un input + flash verde ────────────────────
 
 export function setValInput(id, value, decimals = 2) {
@@ -170,7 +292,8 @@ function ensureValStatus() {
 
 // ── Initializeaza panelul + fetch date fundamentale ───
 
-export function initValuarePanel(currentPrice, currency, yahooSector, ticker, metaFundamentals = {}) {
+export function initValuarePanel(currentPrice, currency, yahooSector, ticker, metaFundamentals = {}, technicalCtx = {}) {
+  _techCtx = technicalCtx;
   const panel = $('valuation-panel');
   if (!panel) return;
 

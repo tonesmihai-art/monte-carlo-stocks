@@ -323,10 +323,13 @@ async function _fetchSEC(ticker) {
   const cik = await _secCIK(ticker);
   if (!cik) throw new Error(`${ticker} nu e in SEC`);
 
-  async function getConcept(name, altName, unit = 'USD') {
+  async function getConcept(name, altName, unit = 'USD', altNamespace = null) {
     const urls = [
       `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${name}.json`,
       altName && `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${altName}.json`,
+      // namespace alternativ (ex. dei pt EntityCommonStockSharesOutstanding)
+      altName && altNamespace
+        && `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/${altNamespace}/${altName}.json`,
       `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/ifrs-full/${name}.json`,
     ].filter(Boolean);
 
@@ -347,7 +350,7 @@ async function _fetchSEC(ticker) {
     getConcept('NetCashProvidedByUsedInOperatingActivities', 'CashFlowsFromUsedInOperatingActivities'),
     getConcept('PaymentsToAcquirePropertyPlantAndEquipment',
                'PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'),
-    getConcept('CommonStockSharesOutstanding', 'EntityCommonStockSharesOutstanding', 'shares'),
+    getConcept('CommonStockSharesOutstanding', 'EntityCommonStockSharesOutstanding', 'shares', 'dei'),
     getConcept('EarningsPerShareDiluted', 'IncomeLossFromContinuingOperationsPerDilutedShare', 'USD/shares'),
     getConcept('EarningsPerShareBasic',   'IncomeLossFromContinuingOperationsPerBasicShare',   'USD/shares'),
   ]);

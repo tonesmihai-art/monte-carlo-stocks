@@ -218,12 +218,13 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
   fetchValuationFundamentals(ticker).then(d => {
     if (metaFundamentals.eps    == null) setValInput('eps',    d.eps,    2);
     if (metaFundamentals.shares == null) setValInput('shares', d.shares, 0);
+    setValInput('pe',     d.pe,          1);
     setValInput('fcf',    d.fcfPerShare, 2);
     setValInput('assets', d.totalAssets, 0);
     setValInput('cash',   d.cash,        0);
     setValInput('debt',   d.debt,        0);
     setValInput('growth', d.growth,      1);
-    statusEl.textContent = '✔ Date Yahoo Finance · P/E corect, WACC, rata terminală — completează manual';
+    statusEl.textContent = '✔ Date Yahoo Finance · WACC, rata terminală — completează manual';
     statusEl.style.color = 'rgba(102,187,106,0.65)';
     updateValuare();
   }).catch(err => {

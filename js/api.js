@@ -249,7 +249,7 @@ const FMP_KEY     = 'U6KIewb4btX6jwjbChgY49mZxVHI30mG';   // ← pune cheia FMP 
 // ── Proxy Python propriu (Render.com) — fallback final, fara CORS ──
 // Dupa deploy pe Render, inlocuieste URL-ul de mai jos cu cel real
 // ex: 'https://monte-carlo-proxy.onrender.com'
-const MY_PROXY = 'https://monte-carlo-proxy.onrender.com';   // ← pune URL-ul dupa deploy
+const MY_PROXY = '';   // ← pune URL-ul dupa deploy
 
 // ── Convertor ticker Yahoo → Finnhub (pentru actiuni europene) ──
 // Yahoo:   ECMPA.AS  →  Finnhub: AMS:ECMPA
@@ -603,8 +603,9 @@ async function _fetchYahooFundamentals(ticker) {
             growth,
             shares:      sharesRaw != null ? sharesRaw / 1e6 : null,
             fcfPerShare: fcfPS,
-            cash:        _yv(fd.totalCash) != null ? _yv(fd.totalCash) / 1e6 : null,
-            debt:        _yv(fd.totalDebt) != null ? _yv(fd.totalDebt) / 1e6 : null,
+            cash:        _yv(fd.totalCash)   != null ? _yv(fd.totalCash)   / 1e6 : null,
+            debt:        _yv(fd.totalDebt)   != null ? _yv(fd.totalDebt)   / 1e6 : null,
+            totalAssets: _yv(fd.totalAssets) != null ? _yv(fd.totalAssets) / 1e6 : null,
           };
         }
       } catch (_) {}

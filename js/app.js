@@ -69,6 +69,8 @@ async function runSimulation() {
     });
     const statusEl = $('val-fetch-status');
     if (statusEl) statusEl.textContent = '';
+    const commentEl = $('val-fundamental-comment');
+    if (commentEl) { commentEl.innerHTML = ''; commentEl.style.display = 'none'; }
   }
   $('run-btn').disabled    = true;
   $('run-btn').textContent = 'Se ruleaza...';
@@ -149,9 +151,11 @@ async function runSimulation() {
       if (sectorResult.status === 'fulfilled') {
         renderSectorBadge(sectorResult.value.sector, sectorResult.value.industry,
                           vixData, sectorResult.value.weights);
-        initValuarePanel(currentPrice, currency, sectorResult.value.sector, ticker, fundamentals);
+        initValuarePanel(currentPrice, currency, sectorResult.value.sector, ticker, fundamentals,
+                         { deviationPct, drift, sigma, mean50 });
       } else {
-        initValuarePanel(currentPrice, currency, null, ticker, fundamentals);
+        initValuarePanel(currentPrice, currency, null, ticker, fundamentals,
+                         { deviationPct, drift, sigma, mean50 });
       }
     }
 
@@ -408,7 +412,7 @@ async function runSimulation() {
 
     // ── 7. Randare rezultate ──────────────────────────
     setStatus('');
-    $('results-section').style.display = 'block';
+    $('results-section').style.display = 'flex';
     const tabsEl = $('period-tabs');
     tabsEl.innerHTML = '';
     PERIODS.forEach((days, i) => {

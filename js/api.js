@@ -436,9 +436,14 @@ const _YPX = [
   u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-  // proxy-ul tau Python — ultimul fallback, cel mai de incredere
-  u => MY_PROXY ? `${MY_PROXY}/proxy?url=${encodeURIComponent(u)}` : null,
-].filter(Boolean);
+];
+
+// Returneaza lista de proxy-uri — include MY_PROXY doar daca e setat
+function _getProxies() {
+  return MY_PROXY
+    ? [..._YPX, u => `${MY_PROXY}/proxy?url=${encodeURIComponent(u)}`]
+    : _YPX;
+}
 
 async function _robustGet(url, ms = 10000) {
   try {
@@ -453,7 +458,7 @@ async function _robustGet(url, ms = 10000) {
       }
     } finally { clearTimeout(tid); }
   } catch (_) {}
-  for (const px of _YPX) {
+  for (const px of _getProxies()) {
     try {
       const j = await _yGet(px(url), Math.min(ms, 8000));
       if (j != null) return j;
@@ -571,7 +576,7 @@ async function _fetchYahooFundamentals(ticker) {
     `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`,
   ];
   for (const url of summaryUrls) {
-    for (const px of _YPX) {
+    for (const px of _getProxies()) {
       try {
         const json = await _yGet(px(url), 4000);  // timeout scurt — v10 necesita crumb
         if (typeof json !== 'object') continue;
@@ -614,7 +619,7 @@ async function _fetchYahooFundamentals(ticker) {
     `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${ticker}`,
   ];
   for (const url of quoteUrls) {
-    for (const px of _YPX) {
+    for (const px of _getProxies()) {
       try {
         const json = await _yGet(px(url), 5000);
         if (typeof json !== 'object') continue;

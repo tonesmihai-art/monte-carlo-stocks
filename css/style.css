@@ -182,6 +182,56 @@ input[type=text]:focus { border-color: var(--blue); }
 .status--error { background: rgba(239,83,80,0.1);  border: 1px solid rgba(239,83,80,0.3);  color: var(--red); }
 .status--warn  { background: rgba(255,167,38,0.1); border: 1px solid rgba(255,167,38,0.3); color: var(--orange); }
 
+/* ── Results section — reordonare flex ──────────── */
+#results-section {
+  display: flex;
+  flex-direction: column;
+}
+.stock-bar      { order: 1; }
+.price-chart-box { order: 2; }
+#valuation-panel { order: 3; }
+.period-tabs    { order: 4; }
+#chart-area     { order: 5; }
+/* comentariu fundamental — sub panelul de valuare */
+#val-fundamental-comment {
+  background: linear-gradient(135deg, rgba(18,18,31,0.95) 0%, rgba(26,26,46,0.95) 100%);
+  border: 1px solid rgba(124,106,247,0.25);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-top: 14px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--white);
+}
+#val-fundamental-comment .vfc-title {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(124,106,247,0.8);
+  margin-bottom: 8px;
+}
+#val-fundamental-comment .vfc-row {
+  margin-bottom: 5px;
+}
+#val-fundamental-comment .vfc-entry-box {
+  background: rgba(124,106,247,0.08);
+  border: 1px solid rgba(124,106,247,0.2);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-top: 10px;
+  font-size: 11px;
+}
+#val-fundamental-comment .vfc-entry-box strong {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: rgba(124,106,247,0.7);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
 /* ── Stock info bar ─────────────────────────────── */
 .stock-bar {
   background: var(--panel);

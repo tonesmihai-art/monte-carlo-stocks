@@ -329,25 +329,49 @@ async function _fetchFinnhub(ticker) {
 //  Tier gratuit: 250 req/zi — https://financialmodelingprep.com/developer/docs
 //  Suporta tickers Yahoo direct: ECMPA.AS, BMW.DE, HSBA.L etc.
 // ─────────────────────────────────────────────────────
+// ── Helper FMP: incearca direct, apoi 3 proxy-uri (la fel ca restul surselor) ──
+async function _fmpGet(url, ms = 10000) {
+  const proxies = [
+    u => u,
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  ];
+  for (const px of proxies) {
+    try {
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), ms);
+      try {
+        const r = await fetch(px(url), { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+        clearTimeout(tid);
+        if (!r.ok) continue;
+        const j = await r.json();
+        if (j != null && !j['Error Message']) return j;
+      } finally { clearTimeout(tid); }
+    } catch (_) {}
+  }
+  return null;
+}
+
 async function _fetchFMP(ticker) {
   if (!FMP_KEY) return {};
 
   const base = 'https://financialmodelingprep.com/api/v3';
-  const ctrl = (ms) => ({ signal: AbortSignal.timeout(ms) });
 
   // Fetch paralel: quote (EPS, PE, shares, price) + key-metrics (FCF/share, growth) + balance-sheet
+  // Fiecare call incearca direct + 3 proxy-uri CORS — la fel ca Yahoo si Finnhub
   const [quoteRes, metricsRes, balRes] = await Promise.allSettled([
-    fetch(`${base}/quote/${ticker}?apikey=${FMP_KEY}`, ctrl(9000))
-      .then(r => r.ok ? r.json() : null),
-    fetch(`${base}/key-metrics/${ticker}?limit=1&apikey=${FMP_KEY}`, ctrl(9000))
-      .then(r => r.ok ? r.json() : null),
-    fetch(`${base}/balance-sheet-statement/${ticker}?limit=1&apikey=${FMP_KEY}`, ctrl(9000))
-      .then(r => r.ok ? r.json() : null),
+    _fmpGet(`${base}/quote/${ticker}?apikey=${FMP_KEY}`)
+      .then(j => j?.[0] ?? null),
+    _fmpGet(`${base}/key-metrics/${ticker}?limit=1&apikey=${FMP_KEY}`)
+      .then(j => j?.[0] ?? null),
+    _fmpGet(`${base}/balance-sheet-statement/${ticker}?limit=1&apikey=${FMP_KEY}`)
+      .then(j => j?.[0] ?? null),
   ]);
 
-  const q   = quoteRes.status   === 'fulfilled' ? quoteRes.value?.[0]   : null;
-  const km  = metricsRes.status === 'fulfilled' ? metricsRes.value?.[0] : null;
-  const bal = balRes.status     === 'fulfilled' ? balRes.value?.[0]     : null;
+  const q   = quoteRes.status   === 'fulfilled' ? quoteRes.value   : null;
+  const km  = metricsRes.status === 'fulfilled' ? metricsRes.value : null;
+  const bal = balRes.status     === 'fulfilled' ? balRes.value     : null;
 
   if (!q && !km && !bal) return {};
 

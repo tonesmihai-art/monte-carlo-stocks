@@ -342,7 +342,13 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
   fetchValuationFundamentals(ticker).then(d => {
     if (metaFundamentals.eps == null) setValInput('eps', d.eps, 2);
     if (metaFundamentals.shares == null) setValInput('shares', d.shares, 0);
-    setValInput('fcf',    d.fcfPerShare, 2);
+    // FCF/acțiune: direct din SEC/Yahoo; fallback calcul din fcfTotal + shares deja in input
+    let fcfPS = d.fcfPerShare;
+    if (fcfPS == null && d.fcfTotal != null) {
+      const sharesVal = parseFloat($('val-shares')?.value);
+      if (sharesVal > 0) fcfPS = d.fcfTotal / sharesVal;  // ($M) / (M shares) = $/share
+    }
+    setValInput('fcf', fcfPS, 2);
     setValInput('assets', d.totalAssets, 0);
     setValInput('cash',   d.cash,        0);
     setValInput('debt',   d.debt,        0);

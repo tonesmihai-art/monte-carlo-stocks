@@ -243,7 +243,7 @@ export function blendSigma(sigmaHist, ivDaily, days) {
 //  Obtine cheia gratuita de pe https://finnhub.io/dashboard
 // ─────────────────────────────────────────────────────
 
-const FINNHUB_KEY = 'd7k8arpr01qn1u2gjttgd7k8arpr01qn1u2gjtu0';   // ← pune cheia ta aici (string)
+const FINNHUB_KEY = '';   // ← pune cheia ta aici (string)
 
 async function _fetchFinnhub(ticker) {
   if (!FINNHUB_KEY) return {};
@@ -272,9 +272,10 @@ async function _fetchFinnhub(ticker) {
   const fcfPerShare = m?.freeCashFlowPerShareTTM    ??
                       m?.freeCashFlowPerShareAnnual  ?? null;
 
-  // ── Crestere (folosim cea mai relevanta) ─────────────
-  const growth = m?.epsGrowth3Y != null ? m.epsGrowth3Y * 100
-               : m?.revenueGrowthQuarterly != null ? m.revenueGrowthQuarterly * 100
+  // ── Crestere — Finnhub returneaza deja in % (5.25 = 5.25%), NU multiplicam cu 100 ──
+  const growth = m?.epsGrowth3Y          != null ? m.epsGrowth3Y
+               : m?.revenueGrowth3Y      != null ? m.revenueGrowth3Y
+               : m?.revenueGrowthQuarterly != null ? m.revenueGrowthQuarterly
                : null;
 
   // ── Shares (profile2 returneaza in milioane direct) ──
@@ -540,11 +541,30 @@ export async function fetchValuationFundamentals(ticker) {
   const cash        = fh.cash        ?? sec.cash  ?? quote.cash             ?? null;
   const debt        = fh.debt        ?? sec.debt  ?? quote.debt             ?? null;
 
+  // ── Sursa per camp (pentru afisare in UI) ─────────────
+  const src = (fhV, secV, quoteV) =>
+    fhV    != null ? 'Finnhub'
+  : secV   != null ? 'SEC'
+  : quoteV != null ? 'Yahoo'
+  : null;
+
+  const sources = {
+    eps:    src(fh.eps,    sec.eps,    quote.eps),
+    pe:     src(fh.pe,     null,       quote.pe),
+    fcf:    src(fh.fcfPerShare, sec.fcfPerShare, quote.fcfPerShare) ?? (sec.fcfTotal != null ? 'SEC calc' : null),
+    growth: src(fh.growth, null,       quote.growth),
+    shares: src(fh.shares, sec.shares, quote.shares),
+    assets: src(fh.totalAssets, sec.totalAssets, null),
+    cash:   src(fh.cash,   sec.cash,   quote.cash),
+    debt:   src(fh.debt,   sec.debt,   quote.debt),
+  };
+
   const result = {
     eps, pe, growth, shares, fcfPerShare,
     fcfTotal:    sec.fcfTotal ?? null,
     totalAssets, cash, debt,
+    sources,
   };
-  if (Object.values(result).every(v => v == null)) throw new Error('Date indisponibile');
+  if (Object.values(result).filter(v => v !== result.sources).every(v => v == null)) throw new Error('Date indisponibile');
   return result;
 }

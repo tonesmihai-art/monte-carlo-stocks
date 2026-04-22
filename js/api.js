@@ -249,7 +249,7 @@ const FMP_KEY     = 'U6KIewb4btX6jwjbChgY49mZxVHI30mG';   // ← pune cheia FMP 
 // ── Proxy Python propriu (Render.com) — fallback final, fara CORS ──
 // Dupa deploy pe Render, inlocuieste URL-ul de mai jos cu cel real
 // ex: 'https://monte-carlo-proxy.onrender.com'
-const MY_PROXY = '';   // ← pune URL-ul dupa deploy
+const MY_PROXY = 'https://monte-carlo-proxy.onrender.com';   // ← pune URL-ul dupa deploy
 
 // ── Convertor ticker Yahoo → Finnhub (pentru actiuni europene) ──
 // Yahoo:   ECMPA.AS  →  Finnhub: AMS:ECMPA

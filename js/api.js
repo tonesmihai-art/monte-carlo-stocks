@@ -373,17 +373,17 @@ async function _fmpGet(url, ms = 10000) {
 async function _fetchFMP(ticker) {
   if (!FMP_KEY) { console.warn('[FMP] Cheie lipsa'); return {}; }
 
-  const base = 'https://financialmodelingprep.com/api/v3';
-  console.log(`[FMP] Incerc pentru ${ticker}...`);
+  // FMP a migrat la /stable/ — endpoint-urile /v3/ sunt deprecate dupa aug 2025
+  const base = 'https://financialmodelingprep.com/stable';
+  console.log(`[FMP] Incerc pentru ${ticker} (stable API)...`);
 
-  // Fetch paralel: quote + key-metrics + balance-sheet
-  // Daca 'Error Message' apare → planul tau nu include endpoint-ul → vezi consola
+  // Noul format: query param ?symbol= in loc de path /{ticker}
   const [quoteRes, metricsRes, balRes] = await Promise.allSettled([
-    _fmpGet(`${base}/quote/${ticker}?apikey=${FMP_KEY}`)
+    _fmpGet(`${base}/quote?symbol=${ticker}&apikey=${FMP_KEY}`)
       .then(j => j?.[0] ?? null),
-    _fmpGet(`${base}/key-metrics/${ticker}?period=annual&limit=1&apikey=${FMP_KEY}`)
+    _fmpGet(`${base}/key-metrics?symbol=${ticker}&period=annual&limit=1&apikey=${FMP_KEY}`)
       .then(j => j?.[0] ?? null),
-    _fmpGet(`${base}/balance-sheet-statement/${ticker}?period=annual&limit=1&apikey=${FMP_KEY}`)
+    _fmpGet(`${base}/balance-sheet-statement?symbol=${ticker}&period=annual&limit=1&apikey=${FMP_KEY}`)
       .then(j => j?.[0] ?? null),
   ]);
 

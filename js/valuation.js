@@ -217,15 +217,25 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
 
   if (!ticker) return;
   fetchValuationFundamentals(ticker).then(d => {
-    if (metaFundamentals.eps    == null) setValInput('eps',    d.eps,    2);
-    if (metaFundamentals.pe     == null) setValInput('pe',     d.pe,     1);
+    if (metaFundamentals.eps == null) setValInput('eps', d.eps, 2);
     if (metaFundamentals.shares == null) setValInput('shares', d.shares, 0);
     setValInput('fcf',    d.fcfPerShare, 2);
     setValInput('assets', d.totalAssets, 0);
     setValInput('cash',   d.cash,        0);
     setValInput('debt',   d.debt,        0);
     setValInput('growth', d.growth,      1);
-    statusEl.textContent = '✔ Date Yahoo Finance · WACC, rata terminală — completează manual';
+
+    // PE: din Yahoo quote; daca lipseste, calculeaza din pret/EPS
+    if (metaFundamentals.pe == null) {
+      const peVal = d.pe ?? (() => {
+        const curPrice = parseFloat($('val-current-price')?.dataset.price);
+        const epsVal   = parseFloat($('val-eps')?.value);
+        return (epsVal > 0 && curPrice > 0) ? curPrice / epsVal : null;
+      })();
+      setValInput('pe', peVal, 1);
+    }
+
+    statusEl.textContent = '✔ Date SEC + Yahoo · WACC, rata terminală — completează manual';
     statusEl.style.color = 'rgba(102,187,106,0.65)';
     updateValuare();
   }).catch(err => {

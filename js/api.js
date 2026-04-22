@@ -330,42 +330,60 @@ async function _fetchFinnhub(ticker) {
 //  Suporta tickers Yahoo direct: ECMPA.AS, BMW.DE, HSBA.L etc.
 // ─────────────────────────────────────────────────────
 // ── Helper FMP: incearca direct, apoi 3 proxy-uri (la fel ca restul surselor) ──
+// ── Helper FMP cu logging — incearca direct + 3 proxy-uri ─
 async function _fmpGet(url, ms = 10000) {
+  const labels  = ['direct', 'corsproxy', 'allorigins', 'codetabs'];
   const proxies = [
     u => u,
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
     u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
   ];
-  for (const px of proxies) {
+  for (let i = 0; i < proxies.length; i++) {
+    const px  = proxies[i];
+    const lbl = labels[i];
     try {
       const ctrl = new AbortController();
       const tid  = setTimeout(() => ctrl.abort(), ms);
       try {
         const r = await fetch(px(url), { signal: ctrl.signal, headers: { Accept: 'application/json' } });
         clearTimeout(tid);
-        if (!r.ok) continue;
+        if (!r.ok) {
+          console.warn(`[FMP] ${lbl} → HTTP ${r.status} pentru ${url.split('?')[0].split('/').slice(-1)[0]}`);
+          continue;
+        }
         const j = await r.json();
-        if (j != null && !j['Error Message']) return j;
+        if (j?.['Error Message']) {
+          console.warn(`[FMP] ${lbl} → Eroare API: "${j['Error Message']}"`);
+          return null;   // eroare FMP — nu mai incerca proxy-uri (cheia sau planul e problema)
+        }
+        if (j != null) {
+          console.log(`[FMP] ${lbl} ✓ — date primite`);
+          return j;
+        }
       } finally { clearTimeout(tid); }
-    } catch (_) {}
+    } catch (e) {
+      console.warn(`[FMP] ${lbl} → ${e.message || 'esec'}`);
+    }
   }
+  console.warn(`[FMP] Toate proxy-urile au esuat pentru ${url.split('?')[0].split('/').slice(-1)[0]}`);
   return null;
 }
 
 async function _fetchFMP(ticker) {
-  if (!FMP_KEY) return {};
+  if (!FMP_KEY) { console.warn('[FMP] Cheie lipsa'); return {}; }
 
   const base = 'https://financialmodelingprep.com/api/v3';
+  console.log(`[FMP] Incerc pentru ${ticker}...`);
 
-  // Fetch paralel: quote (EPS, PE, shares, price) + key-metrics (FCF/share, growth) + balance-sheet
-  // Fiecare call incearca direct + 3 proxy-uri CORS — la fel ca Yahoo si Finnhub
+  // Fetch paralel: quote + key-metrics + balance-sheet
+  // Daca 'Error Message' apare → planul tau nu include endpoint-ul → vezi consola
   const [quoteRes, metricsRes, balRes] = await Promise.allSettled([
     _fmpGet(`${base}/quote/${ticker}?apikey=${FMP_KEY}`)
       .then(j => j?.[0] ?? null),
-    _fmpGet(`${base}/key-metrics/${ticker}?limit=1&apikey=${FMP_KEY}`)
+    _fmpGet(`${base}/key-metrics/${ticker}?period=annual&limit=1&apikey=${FMP_KEY}`)
       .then(j => j?.[0] ?? null),
-    _fmpGet(`${base}/balance-sheet-statement/${ticker}?limit=1&apikey=${FMP_KEY}`)
+    _fmpGet(`${base}/balance-sheet-statement/${ticker}?period=annual&limit=1&apikey=${FMP_KEY}`)
       .then(j => j?.[0] ?? null),
   ]);
 

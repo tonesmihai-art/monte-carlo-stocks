@@ -344,14 +344,54 @@ async function runSimulation() {
             pills.push(`${label} ${val}`);
           });
 
+          // ── Date fundamentale din panelul de valuare ──
+          const getValNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
+          const valFundamentals = {
+            sector:      $('val-sector')?.value || null,
+            eps:         getValNum('eps'),
+            pe:          getValNum('pe'),
+            fcf:         getValNum('fcf'),
+            growth:      getValNum('growth'),
+            wacc:        getValNum('wacc'),
+            tgr:         getValNum('tgr'),
+            assets:      getValNum('assets'),
+            cash:        getValNum('cash'),
+            debt:        getValNum('debt'),
+            shares:      getValNum('shares'),
+            resultsHTML: $('val-results-grid')?.innerHTML || '',
+          };
+
+          // ── Statistici Monte Carlo per perioada ───────
+          const periodStats = {};
+          for (const d of [30, 90, 180, 360]) {
+            const pd = periodResults[d];
+            if (!pd?.stats) continue;
+            const s = pd.stats, sa = pd.statsAdj;
+            periodStats[d] = {
+              mean:       s.mean,    median:     s.median,
+              p90:        s.p90,     p10:        s.p10,
+              max:        s.max,     min:        s.min,
+              probProfit: s.probProfit,
+              probGain10: s.probGain10,
+              probLoss10: s.probLoss10,
+              adjMean: sa?.mean ?? null,
+              adjP90:  sa?.p90  ?? null,
+              adjP10:  sa?.p10  ?? null,
+            };
+          }
+
           const now = new Date();
           saveToWatchlist({
-            ticker, name: name || ticker, price: fmt(currentPrice), currency,
+            ticker, name: name || ticker,
+            price: fmt(currentPrice), currentPrice,
+            currency,
             date:    now.toLocaleDateString('ro-RO',  { day:'2-digit', month:'short', year:'numeric' }),
             time:    now.toLocaleTimeString('ro-RO',  { hour:'2-digit', minute:'2-digit' }),
             pills,
-            comment: $('quality-comment')?.innerHTML || '',
+            comment:         $('quality-comment')?.innerHTML || '',
             charts,
+            valFundamentals,
+            periodStats,
           });
           renderWatchlist();
           saveBtn.textContent = '✓ Salvat!';

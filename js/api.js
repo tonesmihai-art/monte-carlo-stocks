@@ -308,8 +308,13 @@ async function _secCIK(ticker) {
 function _secLatest(json, unit = 'USD') {
   const arr = json?.units?.[unit];
   if (!arr) return null;
-  return arr
+  // prefer annual (10-K/20-F); fallback la trimestrial (10-Q) daca nu exista anual
+  const annual = arr
     .filter(d => d.val != null && /^(10-K|20-F)/.test(d.form))
+    .sort((a, b) => new Date(b.end) - new Date(a.end))[0]?.val;
+  if (annual != null) return annual;
+  return arr
+    .filter(d => d.val != null && /^10-Q/.test(d.form))
     .sort((a, b) => new Date(b.end) - new Date(a.end))[0]?.val ?? null;
 }
 
@@ -334,26 +339,29 @@ async function _fetchSEC(ticker) {
     return null;
   }
 
-  const [assets, cash, debt, opCF, capex, sharesN, epsDiluted, epsBasic] = await Promise.all([
+  const [assets, cash, debt, opCF, capex, sharesN, sharesN2, epsDiluted, epsBasic] = await Promise.all([
     getConcept('Assets', null),
     getConcept('CashAndCashEquivalentsAtCarryingValue', 'CashAndCashEquivalents'),
     getConcept('LongTermDebt', 'LongTermDebtNoncurrent'),
     getConcept('NetCashProvidedByUsedInOperatingActivities', 'CashFlowsFromUsedInOperatingActivities'),
     getConcept('PaymentsToAcquirePropertyPlantAndEquipment',
                'PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'),
-    getConcept('CommonStockSharesOutstanding', null, 'shares'),
+    getConcept('CommonStockSharesOutstanding', 'EntityCommonStockSharesOutstanding', 'shares'),
+    getConcept('CommonStockSharesOutstanding', null, 'shares'),   // retry fara altName
     getConcept('EarningsPerShareDiluted', 'IncomeLossFromContinuingOperationsPerDilutedShare', 'USD/shares'),
     getConcept('EarningsPerShareBasic',   'IncomeLossFromContinuingOperationsPerBasicShare',   'USD/shares'),
   ]);
 
-  const fcf = opCF != null ? opCF - (capex ?? 0) : null;
+  const rawShares = sharesN ?? sharesN2 ?? null;
+  const fcf  = opCF != null ? opCF - (capex ?? 0) : null;
   const eps  = epsDiluted ?? epsBasic ?? null;
   return {
-    totalAssets: assets  != null ? assets  / 1e6 : null,
-    cash:        cash    != null ? cash    / 1e6 : null,
-    debt:        debt    != null ? debt    / 1e6 : null,
-    shares:      sharesN != null ? sharesN / 1e6 : null,
-    fcfPerShare: (fcf != null && sharesN > 0) ? fcf / sharesN : null,
+    totalAssets: assets    != null ? assets    / 1e6 : null,
+    cash:        cash      != null ? cash      / 1e6 : null,
+    debt:        debt      != null ? debt      / 1e6 : null,
+    shares:      rawShares != null ? rawShares / 1e6 : null,
+    fcfTotal:    fcf       != null ? fcf       / 1e6 : null,   // FCF total in milioane $
+    fcfPerShare: (fcf != null && rawShares > 0) ? fcf / rawShares : null,
     eps,
   };
 }
@@ -448,18 +456,25 @@ export async function fetchValuationFundamentals(ticker) {
   const sec   = secR.status   === 'fulfilled' ? secR.value   : {};
   const quote = quoteR.status === 'fulfilled' ? quoteR.value : {};
 
-  const eps = sec.eps ?? quote.eps ?? null;
-  const pe  = quote.pe ?? null;   // PE vine din Yahoo quote; daca lipseste il calculeaza UI
+  const eps    = sec.eps    ?? quote.eps    ?? null;
+  const pe     = quote.pe                  ?? null;
+  const shares = sec.shares ?? quote.shares ?? null;
+
+  // fcfPerShare: preferinta directa; fallback calcul din fcfTotal (milioane $) / shares (milioane)
+  let fcfPerShare = sec.fcfPerShare ?? quote.fcfPerShare ?? null;
+  if (fcfPerShare == null && sec.fcfTotal != null && shares != null && shares > 0) {
+    fcfPerShare = sec.fcfTotal / shares;   // ($M) / (M shares) = $/share
+  }
 
   const result = {
     eps,
     pe,
-    growth:      quote.growth                         ?? null,
-    shares:      sec.shares      ?? quote.shares      ?? null,
-    fcfPerShare: sec.fcfPerShare ?? quote.fcfPerShare ?? null,
-    totalAssets: sec.totalAssets                      ?? null,
-    cash:        sec.cash        ?? quote.cash        ?? null,
-    debt:        sec.debt        ?? quote.debt        ?? null,
+    growth:      quote.growth   ?? null,
+    shares,
+    fcfPerShare,
+    totalAssets: sec.totalAssets ?? null,
+    cash:        sec.cash  ?? quote.cash  ?? null,
+    debt:        sec.debt  ?? quote.debt  ?? null,
   };
   if (Object.values(result).every(v => v == null)) throw new Error('Date indisponibile');
   return result;

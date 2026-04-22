@@ -203,10 +203,11 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
   const statusEl = ensureValStatus();
   let metaPopulated = 0;
   if (metaFundamentals.eps    != null) { setValInput('eps',    metaFundamentals.eps,    2); metaPopulated++; }
+  if (metaFundamentals.pe     != null) { setValInput('pe',     metaFundamentals.pe,     1); metaPopulated++; }
   if (metaFundamentals.shares != null) { setValInput('shares', metaFundamentals.shares, 0); metaPopulated++; }
 
   if (metaPopulated > 0) {
-    statusEl.textContent = `✔ EPS + acțiuni din chart API · se descarcă FCF, cash, datorii...`;
+    statusEl.textContent = `✔ EPS + P/E din chart API · se descarcă FCF, cash, datorii...`;
     statusEl.style.color = 'rgba(102,187,106,0.55)';
   } else {
     statusEl.textContent = '⏳ Se descarcă date fundamentale...';
@@ -217,8 +218,8 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
   if (!ticker) return;
   fetchValuationFundamentals(ticker).then(d => {
     if (metaFundamentals.eps    == null) setValInput('eps',    d.eps,    2);
+    if (metaFundamentals.pe     == null) setValInput('pe',     d.pe,     1);
     if (metaFundamentals.shares == null) setValInput('shares', d.shares, 0);
-    setValInput('pe',     d.pe,          1);
     setValInput('fcf',    d.fcfPerShare, 2);
     setValInput('assets', d.totalAssets, 0);
     setValInput('cash',   d.cash,        0);

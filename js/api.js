@@ -334,7 +334,7 @@ async function _fetchSEC(ticker) {
     return null;
   }
 
-  const [assets, cash, debt, opCF, capex, sharesN] = await Promise.all([
+  const [assets, cash, debt, opCF, capex, sharesN, epsDiluted, epsBasic] = await Promise.all([
     getConcept('Assets', null),
     getConcept('CashAndCashEquivalentsAtCarryingValue', 'CashAndCashEquivalents'),
     getConcept('LongTermDebt', 'LongTermDebtNoncurrent'),
@@ -342,15 +342,19 @@ async function _fetchSEC(ticker) {
     getConcept('PaymentsToAcquirePropertyPlantAndEquipment',
                'PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'),
     getConcept('CommonStockSharesOutstanding', null, 'shares'),
+    getConcept('EarningsPerShareDiluted', 'IncomeLossFromContinuingOperationsPerDilutedShare', 'USD/shares'),
+    getConcept('EarningsPerShareBasic',   'IncomeLossFromContinuingOperationsPerBasicShare',   'USD/shares'),
   ]);
 
   const fcf = opCF != null ? opCF - (capex ?? 0) : null;
+  const eps  = epsDiluted ?? epsBasic ?? null;
   return {
     totalAssets: assets  != null ? assets  / 1e6 : null,
     cash:        cash    != null ? cash    / 1e6 : null,
     debt:        debt    != null ? debt    / 1e6 : null,
     shares:      sharesN != null ? sharesN / 1e6 : null,
     fcfPerShare: (fcf != null && sharesN > 0) ? fcf / sharesN : null,
+    eps,
   };
 }
 
@@ -444,9 +448,12 @@ export async function fetchValuationFundamentals(ticker) {
   const sec   = secR.status   === 'fulfilled' ? secR.value   : {};
   const quote = quoteR.status === 'fulfilled' ? quoteR.value : {};
 
+  const eps = sec.eps ?? quote.eps ?? null;
+  const pe  = quote.pe ?? null;   // PE vine din Yahoo quote; daca lipseste il calculeaza UI
+
   const result = {
-    eps:         quote.eps                            ?? null,
-    pe:          quote.pe                             ?? null,
+    eps,
+    pe,
     growth:      quote.growth                         ?? null,
     shares:      sec.shares      ?? quote.shares      ?? null,
     fcfPerShare: sec.fcfPerShare ?? quote.fcfPerShare ?? null,

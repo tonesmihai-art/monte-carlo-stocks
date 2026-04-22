@@ -243,8 +243,8 @@ export function blendSigma(sigmaHist, ivDaily, days) {
 //  Obtine cheia gratuita de pe https://finnhub.io/dashboard
 // ─────────────────────────────────────────────────────
 
-const FINNHUB_KEY = '';   // ← pune cheia ta aici (string)
-const FMP_KEY     = '';   // ← pune cheia FMP (https://financialmodelingprep.com/developer/docs) — tier gratuit 250 req/zi
+const FINNHUB_KEY = 'd7k8arpr01qn1u2gjttgd7k8arpr01qn1u2gjtu0';   // ← pune cheia ta aici (string)
+const FMP_KEY     = 'U6KIewb4btX6jwjbChgY49mZxVHI30mG';   // ← pune cheia FMP (https://financialmodelingprep.com/developer/docs) — tier gratuit 250 req/zi
 
 // ── Convertor ticker Yahoo → Finnhub (pentru actiuni europene) ──
 // Yahoo:   ECMPA.AS  →  Finnhub: AMS:ECMPA

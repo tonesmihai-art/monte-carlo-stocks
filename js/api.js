@@ -244,18 +244,49 @@ export function blendSigma(sigmaHist, ivDaily, days) {
 // ─────────────────────────────────────────────────────
 
 const FINNHUB_KEY = '';   // ← pune cheia ta aici (string)
+const FMP_KEY     = '';   // ← pune cheia FMP (https://financialmodelingprep.com/developer/docs) — tier gratuit 250 req/zi
+
+// ── Convertor ticker Yahoo → Finnhub (pentru actiuni europene) ──
+// Yahoo:   ECMPA.AS  →  Finnhub: AMS:ECMPA
+// Yahoo:   BMW.DE    →  Finnhub: XETRA:BMW
+// Yahoo:   HSBA.L    →  Finnhub: LSE:HSBA
+function _toFinnhubTicker(ticker) {
+  const map = {
+    '.AS': 'AMS',    // Euronext Amsterdam
+    '.DE': 'XETRA',  // Deutsche Börse / Xetra
+    '.L':  'LSE',    // London Stock Exchange
+    '.PA': 'EPA',    // Euronext Paris
+    '.MI': 'BIT',    // Borsa Italiana
+    '.SW': 'SWX',    // SIX Swiss Exchange
+    '.BR': 'EBR',    // Euronext Brussels
+    '.LS': 'ELI',    // Euronext Lisbon
+    '.MC': 'BME',    // Bolsa de Madrid
+    '.HE': 'HEL',    // Nasdaq Helsinki
+    '.ST': 'STO',    // Nasdaq Stockholm
+    '.CO': 'CPH',    // Nasdaq Copenhagen
+    '.OL': 'OSL',    // Oslo Bors
+    '.VI': 'VIE',    // Wiener Börse
+  };
+  for (const [suffix, exchange] of Object.entries(map)) {
+    if (ticker.endsWith(suffix)) {
+      return `${exchange}:${ticker.slice(0, -suffix.length)}`;
+    }
+  }
+  return ticker; // US / fara sufix — ramane neschimbat
+}
 
 async function _fetchFinnhub(ticker) {
   if (!FINNHUB_KEY) return {};
 
+  const fhTicker = _toFinnhubTicker(ticker);   // conversie EU daca e cazul
   const base = 'https://finnhub.io/api/v1';
   const ctrl = (ms) => ({ signal: AbortSignal.timeout(ms) });
 
   // Fetch paralel: metrics (EPS, PE, FCF, growth, bilant) + profile (shares)
   const [metRes, profRes] = await Promise.allSettled([
-    fetch(`${base}/stock/metric?symbol=${ticker}&metric=all&token=${FINNHUB_KEY}`, ctrl(9000))
+    fetch(`${base}/stock/metric?symbol=${fhTicker}&metric=all&token=${FINNHUB_KEY}`, ctrl(9000))
       .then(r => r.ok ? r.json() : null),
-    fetch(`${base}/stock/profile2?symbol=${ticker}&token=${FINNHUB_KEY}`, ctrl(7000))
+    fetch(`${base}/stock/profile2?symbol=${fhTicker}&token=${FINNHUB_KEY}`, ctrl(7000))
       .then(r => r.ok ? r.json() : null),
   ]);
 
@@ -291,6 +322,56 @@ async function _fetchFinnhub(ticker) {
   const debt        = toM(m?.totalDebt);
 
   return { eps, pe, fcfPerShare, growth, shares, totalAssets, cash, debt };
+}
+
+// ─────────────────────────────────────────────────────
+//  FMP — Financial Modeling Prep (actiuni EU + US)
+//  Tier gratuit: 250 req/zi — https://financialmodelingprep.com/developer/docs
+//  Suporta tickers Yahoo direct: ECMPA.AS, BMW.DE, HSBA.L etc.
+// ─────────────────────────────────────────────────────
+async function _fetchFMP(ticker) {
+  if (!FMP_KEY) return {};
+
+  const base = 'https://financialmodelingprep.com/api/v3';
+  const ctrl = (ms) => ({ signal: AbortSignal.timeout(ms) });
+
+  // Fetch paralel: quote (EPS, PE, shares, price) + key-metrics (FCF/share, growth) + balance-sheet
+  const [quoteRes, metricsRes, balRes] = await Promise.allSettled([
+    fetch(`${base}/quote/${ticker}?apikey=${FMP_KEY}`, ctrl(9000))
+      .then(r => r.ok ? r.json() : null),
+    fetch(`${base}/key-metrics/${ticker}?limit=1&apikey=${FMP_KEY}`, ctrl(9000))
+      .then(r => r.ok ? r.json() : null),
+    fetch(`${base}/balance-sheet-statement/${ticker}?limit=1&apikey=${FMP_KEY}`, ctrl(9000))
+      .then(r => r.ok ? r.json() : null),
+  ]);
+
+  const q   = quoteRes.status   === 'fulfilled' ? quoteRes.value?.[0]   : null;
+  const km  = metricsRes.status === 'fulfilled' ? metricsRes.value?.[0] : null;
+  const bal = balRes.status     === 'fulfilled' ? balRes.value?.[0]     : null;
+
+  if (!q && !km && !bal) return {};
+
+  const toN = v => (v != null && isFinite(v)) ? v : null;
+
+  // FMP returneaza shares in bucati (nu milioane), cash/debt in USD
+  const sharesRaw  = toN(q?.sharesOutstanding);
+  const fcfPerShare = toN(km?.freeCashFlowPerShare);
+  const growth = toN(km?.revenueGrowth) != null
+    ? km.revenueGrowth * 100     // FMP da 0.05 = 5% — multiplicam cu 100
+    : toN(km?.earningsGrowth) != null
+    ? km.earningsGrowth * 100
+    : null;
+
+  return {
+    eps:         toN(q?.eps),
+    pe:          toN(q?.pe),
+    growth,
+    shares:      sharesRaw != null ? sharesRaw / 1e6 : null,
+    fcfPerShare,
+    totalAssets: bal?.totalAssets  != null ? bal.totalAssets  / 1e6 : null,
+    cash:        bal?.cashAndCashEquivalents != null ? bal.cashAndCashEquivalents / 1e6 : null,
+    debt:        bal?.totalDebt    != null ? bal.totalDebt    / 1e6 : null,
+  };
 }
 
 // ── Fetch robustez ────────────────────────────────────
@@ -511,52 +592,57 @@ async function _fetchYahooFundamentals(ticker) {
 
 export async function fetchValuationFundamentals(ticker) {
   const isUS = !ticker.includes('.') && !ticker.includes('-');
+  const isEU = !isUS;   // orice ticker cu sufix = actiune europeana / internationala
 
   // ── Lansam toate sursele in paralel ───────────────────
+  // Ordinea de prioritate: Finnhub > FMP > SEC (US only) > Yahoo
   const tasks = [
-    _fetchFinnhub(ticker),                                         // Finnhub — primar
-    isUS ? _fetchSEC(ticker) : Promise.resolve({}),                // SEC EDGAR — fallback US
+    _fetchFinnhub(ticker),                                         // Finnhub — primar (US + EU cu conversie ticker)
+    _fetchFMP(ticker),                                             // FMP — fallback EU (si US), tier gratuit 250 req/zi
+    isUS ? _fetchSEC(ticker) : Promise.resolve({}),                // SEC EDGAR — US only
     _fetchYahooFundamentals(ticker),                               // Yahoo — fallback general
   ];
-  const [fhR, secR, quoteR] = await Promise.allSettled(tasks);
+  const [fhR, fmpR, secR, quoteR] = await Promise.allSettled(tasks);
 
   const fh    = fhR.status    === 'fulfilled' ? fhR.value    : {};
+  const fmp   = fmpR.status   === 'fulfilled' ? fmpR.value   : {};
   const sec   = secR.status   === 'fulfilled' ? secR.value   : {};
   const quote = quoteR.status === 'fulfilled' ? quoteR.value : {};
 
-  // ── Merge: Finnhub > SEC > Yahoo (primul non-null castiga) ──
-  const eps    = fh.eps    ?? sec.eps    ?? quote.eps    ?? null;
-  const pe     = fh.pe     ?? quote.pe                  ?? null;
-  const shares = fh.shares ?? sec.shares ?? quote.shares ?? null;
-  const growth = fh.growth ?? quote.growth               ?? null;
+  // ── Merge: Finnhub > FMP > SEC > Yahoo (primul non-null castiga) ──
+  const eps    = fh.eps    ?? fmp.eps    ?? sec.eps    ?? quote.eps    ?? null;
+  const pe     = fh.pe     ?? fmp.pe     ?? quote.pe                  ?? null;
+  const shares = fh.shares ?? fmp.shares ?? sec.shares ?? quote.shares ?? null;
+  const growth = fh.growth ?? fmp.growth ?? quote.growth               ?? null;
 
-  // FCF per share: Finnhub direct, sau calcul din fcfTotal SEC + shares disponibil
-  let fcfPerShare = fh.fcfPerShare ?? sec.fcfPerShare ?? quote.fcfPerShare ?? null;
+  // FCF per share: Finnhub direct, sau FMP, sau calcul din fcfTotal SEC + shares disponibil
+  let fcfPerShare = fh.fcfPerShare ?? fmp.fcfPerShare ?? sec.fcfPerShare ?? quote.fcfPerShare ?? null;
   if (fcfPerShare == null && sec.fcfTotal != null && shares != null && shares > 0) {
     fcfPerShare = sec.fcfTotal / shares;   // ($M) / (M shares) = $/share
   }
 
-  // Bilant: Finnhub > SEC > Yahoo
-  const totalAssets = fh.totalAssets ?? sec.totalAssets                     ?? null;
-  const cash        = fh.cash        ?? sec.cash  ?? quote.cash             ?? null;
-  const debt        = fh.debt        ?? sec.debt  ?? quote.debt             ?? null;
+  // Bilant: Finnhub > FMP > SEC > Yahoo
+  const totalAssets = fh.totalAssets ?? fmp.totalAssets ?? sec.totalAssets                    ?? null;
+  const cash        = fh.cash        ?? fmp.cash        ?? sec.cash  ?? quote.cash            ?? null;
+  const debt        = fh.debt        ?? fmp.debt        ?? sec.debt  ?? quote.debt            ?? null;
 
   // ── Sursa per camp (pentru afisare in UI) ─────────────
-  const src = (fhV, secV, quoteV) =>
+  const src4 = (fhV, fmpV, secV, quoteV) =>
     fhV    != null ? 'Finnhub'
+  : fmpV   != null ? 'FMP'
   : secV   != null ? 'SEC'
   : quoteV != null ? 'Yahoo'
   : null;
 
   const sources = {
-    eps:    src(fh.eps,    sec.eps,    quote.eps),
-    pe:     src(fh.pe,     null,       quote.pe),
-    fcf:    src(fh.fcfPerShare, sec.fcfPerShare, quote.fcfPerShare) ?? (sec.fcfTotal != null ? 'SEC calc' : null),
-    growth: src(fh.growth, null,       quote.growth),
-    shares: src(fh.shares, sec.shares, quote.shares),
-    assets: src(fh.totalAssets, sec.totalAssets, null),
-    cash:   src(fh.cash,   sec.cash,   quote.cash),
-    debt:   src(fh.debt,   sec.debt,   quote.debt),
+    eps:    src4(fh.eps,    fmp.eps,    sec.eps,    quote.eps),
+    pe:     src4(fh.pe,     fmp.pe,     null,       quote.pe),
+    fcf:    src4(fh.fcfPerShare, fmp.fcfPerShare, sec.fcfPerShare, quote.fcfPerShare) ?? (sec.fcfTotal != null ? 'SEC calc' : null),
+    growth: src4(fh.growth, fmp.growth, null,       quote.growth),
+    shares: src4(fh.shares, fmp.shares, sec.shares, quote.shares),
+    assets: src4(fh.totalAssets, fmp.totalAssets, sec.totalAssets, null),
+    cash:   src4(fh.cash,   fmp.cash,   sec.cash,   quote.cash),
+    debt:   src4(fh.debt,   fmp.debt,   sec.debt,   quote.debt),
   };
 
   const result = {

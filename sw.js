@@ -1,42 +1,57 @@
-const CACHE_NAME = 'mc-stocks-v29';
-const ASSETS = [
-  '/',
-  '/index.html',
-  '/css/style.css',
-  '/js/app.js',
-  '/js/montecarlo.js',
-  '/js/charts.js',
-  '/js/sentiment.js',
-  'https://cdn.jsdelivr.net/npm/chart.js',
+const CACHE_NAME = 'mc-stocks-v30';
+const STATIC_EXTENSIONS = [
+  '.html', '.css', '.js', '.png', '.jpg', '.jpeg', '.svg', '.json'
 ];
 
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(c => c.addAll(ASSETS.filter(a => !a.startsWith('http'))))
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => {
+      return cache.addAll([
+        '/',
+        '/index.html',
+        '/css/style.css',
+        '/js/app.js',
+        '/js/montecarlo.js',
+        '/js/charts.js',
+        '/js/sentiment.js',
+        '/manifest.json'
+      ]);
+    })
   );
   self.skipWaiting();
 });
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
+self.addEventListener('activate', event => {
+  event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', e => {
-  // Datele financiare si stirile => network first, fallback cache
-  if (e.request.url.includes('finance.yahoo') ||
-      e.request.url.includes('corsproxy') ||
-      e.request.url.includes('rss2json')) {
-    e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
-    );
-    return;
+// Interceptează DOAR fișiere locale statice
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+
+  // 1) Ignoră complet requesturile către domenii externe
+  if (url.origin !== self.location.origin) {
+    return; // nu interceptăm deloc
   }
-  // Restul => cache first
-  e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
+
+  // 2) Interceptează DOAR fișiere statice
+  if (!STATIC_EXTENSIONS.some(ext => url.pathname.endsWith(ext))) {
+    return; // nu e fișier static → nu interceptăm
+  }
+
+  // 3) Cache-first pentru fișiere locale
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      return cached || fetch(event.request).then(response => {
+        return caches.open(CACHE_NAME).then(cache => {
+          cache.put(event.request, response.clone());
+          return response;
+        });
+      });
+    })
   );
 });

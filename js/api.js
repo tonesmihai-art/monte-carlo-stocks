@@ -243,7 +243,7 @@ export function blendSigma(sigmaHist, ivDaily, days) {
 //  Obtine cheia gratuita de pe https://finnhub.io/dashboard
 // ─────────────────────────────────────────────────────
 
-const FINNHUB_KEY = '';   // ← pune cheia ta aici (string)
+const FINNHUB_KEY = 'd7k8arpr01qn1u2gjttgd7k8arpr01qn1u2gjtu0';   // ← pune cheia ta aici (string)
 
 async function _fetchFinnhub(ticker) {
   if (!FINNHUB_KEY) return {};

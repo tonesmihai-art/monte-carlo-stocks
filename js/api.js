@@ -238,6 +238,60 @@ export function blendSigma(sigmaHist, ivDaily, days) {
   return ivWeight * ivDaily + (1 - ivWeight) * sigmaHist;
 }
 
+// ─────────────────────────────────────────────────────
+//  FINNHUB — date fundamentale complete, CORS nativ, fara proxy
+//  Obtine cheia gratuita de pe https://finnhub.io/dashboard
+// ─────────────────────────────────────────────────────
+
+const FINNHUB_KEY = '';   // ← pune cheia ta aici (string)
+
+async function _fetchFinnhub(ticker) {
+  if (!FINNHUB_KEY) return {};
+
+  const base = 'https://finnhub.io/api/v1';
+  const ctrl = (ms) => ({ signal: AbortSignal.timeout(ms) });
+
+  // Fetch paralel: metrics (EPS, PE, FCF, growth, bilant) + profile (shares)
+  const [metRes, profRes] = await Promise.allSettled([
+    fetch(`${base}/stock/metric?symbol=${ticker}&metric=all&token=${FINNHUB_KEY}`, ctrl(9000))
+      .then(r => r.ok ? r.json() : null),
+    fetch(`${base}/stock/profile2?symbol=${ticker}&token=${FINNHUB_KEY}`, ctrl(7000))
+      .then(r => r.ok ? r.json() : null),
+  ]);
+
+  const m = metRes.status  === 'fulfilled' ? metRes.value?.metric   : null;
+  const p = profRes.status === 'fulfilled' ? profRes.value           : null;
+
+  if (!m && !p) return {};
+
+  // ── EPS, PE ──────────────────────────────────────────
+  const eps = m?.epsTTM          ?? m?.epsAnnual          ?? null;
+  const pe  = m?.peTTM           ?? m?.peAnnual           ?? null;
+
+  // ── FCF per share ────────────────────────────────────
+  const fcfPerShare = m?.freeCashFlowPerShareTTM    ??
+                      m?.freeCashFlowPerShareAnnual  ?? null;
+
+  // ── Crestere (folosim cea mai relevanta) ─────────────
+  const growth = m?.epsGrowth3Y != null ? m.epsGrowth3Y * 100
+               : m?.revenueGrowthQuarterly != null ? m.revenueGrowthQuarterly * 100
+               : null;
+
+  // ── Shares (profile2 returneaza in milioane direct) ──
+  const shares = p?.shareOutstanding ?? null;
+
+  // ── Bilant — Finnhub returneaza in milioane $ ────────
+  // Daca valorile par in miliarde (ex. VZ assets ~220 in loc de 220000)
+  // ele sunt deja in milioane; verifica prima data si ajusteaza scala mai jos
+  const toM = v => (v != null && isFinite(v)) ? v : null;
+
+  const totalAssets = toM(m?.totalAssets);      // in milioane $
+  const cash        = toM(m?.cashAndEquivalents);
+  const debt        = toM(m?.totalDebt);
+
+  return { eps, pe, fcfPerShare, growth, shares, totalAssets, cash, debt };
+}
+
 // ── Fetch robustez ────────────────────────────────────
 
 async function _yGet(url, timeoutMs = 8000) {
@@ -456,34 +510,40 @@ async function _fetchYahooFundamentals(ticker) {
 
 export async function fetchValuationFundamentals(ticker) {
   const isUS = !ticker.includes('.') && !ticker.includes('-');
-  const tasks = isUS
-    ? [_fetchSEC(ticker), _fetchYahooFundamentals(ticker)]
-    : [Promise.resolve({}), _fetchYahooFundamentals(ticker)];
 
-  const [secR, quoteR] = await Promise.allSettled(tasks);
+  // ── Lansam toate sursele in paralel ───────────────────
+  const tasks = [
+    _fetchFinnhub(ticker),                                         // Finnhub — primar
+    isUS ? _fetchSEC(ticker) : Promise.resolve({}),                // SEC EDGAR — fallback US
+    _fetchYahooFundamentals(ticker),                               // Yahoo — fallback general
+  ];
+  const [fhR, secR, quoteR] = await Promise.allSettled(tasks);
+
+  const fh    = fhR.status    === 'fulfilled' ? fhR.value    : {};
   const sec   = secR.status   === 'fulfilled' ? secR.value   : {};
   const quote = quoteR.status === 'fulfilled' ? quoteR.value : {};
 
-  const eps    = sec.eps    ?? quote.eps    ?? null;
-  const pe     = quote.pe                  ?? null;
-  const shares = sec.shares ?? quote.shares ?? null;
+  // ── Merge: Finnhub > SEC > Yahoo (primul non-null castiga) ──
+  const eps    = fh.eps    ?? sec.eps    ?? quote.eps    ?? null;
+  const pe     = fh.pe     ?? quote.pe                  ?? null;
+  const shares = fh.shares ?? sec.shares ?? quote.shares ?? null;
+  const growth = fh.growth ?? quote.growth               ?? null;
 
-  // fcfPerShare: preferinta directa; fallback calcul din fcfTotal (milioane $) / shares (milioane)
-  let fcfPerShare = sec.fcfPerShare ?? quote.fcfPerShare ?? null;
+  // FCF per share: Finnhub direct, sau calcul din fcfTotal SEC + shares disponibil
+  let fcfPerShare = fh.fcfPerShare ?? sec.fcfPerShare ?? quote.fcfPerShare ?? null;
   if (fcfPerShare == null && sec.fcfTotal != null && shares != null && shares > 0) {
     fcfPerShare = sec.fcfTotal / shares;   // ($M) / (M shares) = $/share
   }
 
+  // Bilant: Finnhub > SEC > Yahoo
+  const totalAssets = fh.totalAssets ?? sec.totalAssets                     ?? null;
+  const cash        = fh.cash        ?? sec.cash  ?? quote.cash             ?? null;
+  const debt        = fh.debt        ?? sec.debt  ?? quote.debt             ?? null;
+
   const result = {
-    eps,
-    pe,
-    growth:      quote.growth   ?? null,
-    shares,
-    fcfPerShare,
-    fcfTotal:    sec.fcfTotal   ?? null,   // FCF total in milioane $ (fallback pt calcul per-share)
-    totalAssets: sec.totalAssets ?? null,
-    cash:        sec.cash  ?? quote.cash  ?? null,
-    debt:        sec.debt  ?? quote.debt  ?? null,
+    eps, pe, growth, shares, fcfPerShare,
+    fcfTotal:    sec.fcfTotal ?? null,
+    totalAssets, cash, debt,
   };
   if (Object.values(result).every(v => v == null)) throw new Error('Date indisponibile');
   return result;

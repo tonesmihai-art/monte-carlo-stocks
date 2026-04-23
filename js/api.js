@@ -249,7 +249,7 @@ const FMP_KEY     = 'U6KIewb4btX6jwjbChgY49mZxVHI30mG';   // ← pune cheia FMP 
 // ── Proxy Python propriu (Render.com) — fallback final, fara CORS ──
 // Dupa deploy pe Render, inlocuieste URL-ul de mai jos cu cel real
 // ex: 'https://monte-carlo-proxy.onrender.com'
-const MY_PROXY = 'https://monte-carlo-proxy.onrender.com';   // ← pune URL-ul dupa deploy
+const MY_PROXY = '';   // ← pune URL-ul dupa deploy
 
 // ── Convertor ticker Yahoo → Finnhub (pentru actiuni europene) ──
 // Yahoo:   ECMPA.AS  →  Finnhub: AMS:ECMPA
@@ -589,9 +589,11 @@ async function _fetchYahooFundamentals(ticker) {
           const sharesRaw = _yv(ks.sharesOutstanding);
           const fcfTotal  = _yv(fd.freeCashflow);
           const eps    = _yv(ks.trailingEps);
-          const pe     = _yv(sd.trailingPE) ?? _yv(sd.forwardPE) ?? null;
+          const pe     = _yv(sd.trailingPE) ?? _yv(sd.forwardPE) ?? _yv(ks.trailingPE) ?? null;
           const growth = _yv(fd.earningsGrowth) != null ? _yv(fd.earningsGrowth) * 100
                        : _yv(fd.revenueGrowth)  != null ? _yv(fd.revenueGrowth)  * 100 : null;
+          console.log(`[Proxy] ${ticker} — eps=${eps} pe=${pe} fcf=${fcfTotal} shares=${sharesRaw}`,
+            'ks.trailingEps=', ks.trailingEps, 'sd.trailingPE=', sd.trailingPE);
           if (eps != null || pe != null || fcfTotal != null) {
             return {
               eps, pe, growth,
@@ -604,7 +606,7 @@ async function _fetchYahooFundamentals(ticker) {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[Proxy fast-path error]', e); }
   }
 
   for (const url of summaryUrls) {

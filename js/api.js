@@ -498,7 +498,7 @@ async function _fetchYahooFundamentals(ticker) {
       `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}&formatted=false`
     )}`;
     try {
-      const json = await _yGet(proxyUrl, 35000);
+      const json = await _yGet(proxyUrl, 12000);
       if (typeof json === 'object') {
         const r = json?.quoteSummary?.result?.[0];
         if (r) {
@@ -530,7 +530,7 @@ async function _fetchYahooFundamentals(ticker) {
   for (const url of summaryUrls) {
     for (const px of _getProxies()) {
       try {
-        const json = await _yGet(px(url), 4000);  // timeout scurt — v10 necesita crumb
+        const json = await _yGet(px(url), 3000);  // timeout scurt — v10 necesita crumb
         if (typeof json !== 'object') continue;
         const r = json?.quoteSummary?.result?.[0];
         if (!r) continue;
@@ -574,7 +574,7 @@ async function _fetchYahooFundamentals(ticker) {
   for (const url of quoteUrls) {
     for (const px of _getProxies()) {
       try {
-        const json = await _yGet(px(url), 5000);
+        const json = await _yGet(px(url), 4000);
         if (typeof json !== 'object') continue;
         const q = json?.quoteResponse?.result?.[0];
         if (!q) continue;

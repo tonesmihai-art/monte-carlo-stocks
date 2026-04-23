@@ -699,6 +699,9 @@ export async function fetchValuationFundamentals(ticker) {
   const pe     = fh.pe     ?? fmp.pe     ?? quote.pe                  ?? null;
   const shares = fh.shares ?? fmp.shares ?? sec.shares ?? quote.shares ?? null;
   let growth = fh.growth ?? fmp.growth ?? quote.growth               ?? null;
+  const assets = fh.totalAssets ?? fmp.totalAssets ?? sec.totalAssets ?? quote.totalAssets ?? null;
+  const cash   = fh.cash        ?? fmp.cash        ?? sec.cash        ?? quote.cash        ?? null;
+  const debt   = fh.debt        ?? fmp.debt        ?? sec.debt        ?? quote.debt        ?? null;
 
   // --- PATCH: corectare growth Yahoo --- //
   let growthFixed = growth;
@@ -742,7 +745,7 @@ export async function fetchValuationFundamentals(ticker) {
     fcf:    src4(fh.fcfPerShare, fmp.fcfPerShare, sec.fcfPerShare, quote.fcfPerShare) ?? (sec.fcfTotal != null ? 'SEC calc' : null),
     growth: src4(fh.growth, fmp.growth, null,       quote.growth),
     shares: src4(fh.shares, fmp.shares, sec.shares, quote.shares),
-    assets: src4(fh.totalAssets, fmp.totalAssets, sec.totalAssets, null),
+    assets: src4(fh.totalAssets, fmp.totalAssets, sec.totalAssets, quote.totalAssets),
     cash:   src4(fh.cash,   fmp.cash,   sec.cash,   quote.cash),
     debt:   src4(fh.debt,   fmp.debt,   sec.debt,   quote.debt),
   };

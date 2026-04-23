@@ -353,7 +353,7 @@ async function runSimulation() {
           //const getValNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
             const getValNum = id => { const v = parseFloat($(`#val-${id}`)?.value);return isNaN(v) ? null : v;};
           const valFundamentals = {
-            sector:      $('val-sector')?.value || null,
+            sector:      $('#val-sector')?.value || null,
             eps:         getValNum('eps'),
             pe:          getValNum('pe'),
             fcf:         getValNum('fcf'),
@@ -364,8 +364,8 @@ async function runSimulation() {
             cash:        getValNum('cash'),
             debt:        getValNum('debt'),
             shares:      getValNum('shares'),
-            resultsHTML:        $('val-results-grid')?.innerHTML          || '',
-            fundamentalComment: $('val-fundamental-comment')?.innerHTML  || '',
+            resultsHTML:        $('#val-results-grid')?.innerHTML          || '',
+            fundamentalComment: $('#val-fundamental-comment')?.innerHTML  || '',
           };
 
           // ── Statistici Monte Carlo per perioada ───────

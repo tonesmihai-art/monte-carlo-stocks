@@ -374,7 +374,7 @@ async function runSimulation() {
             resultsHTML:        $('#val-results-grid')?.innerHTML          || '',
             fundamentalComment: $('#val-fundamental-comment')?.innerHTML  || '',
           };
-runAIAnalysis(fundData, techData);
+runAIAnalysis(valFundamentals);
 
           // ── Statistici Monte Carlo per perioada ───────
           const periodStats = {};

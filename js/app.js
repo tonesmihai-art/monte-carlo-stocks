@@ -351,7 +351,8 @@ async function runSimulation() {
 
           // ── Date fundamentale din panelul de valuare ──
           //const getValNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
-            const getValNum = id => { const v = parseFloat($(`#val-${id}`)?.value);return isNaN(v) ? null : v;};
+          //const getValNum = id => { const v = parseFloat($(`#val-${id}`)?.value);return isNaN(v) ? null : v;};
+           const getValNum = id => { const v = parseFloat($(`#val-${id}`)?.value);  return isNaN(v) ? null : v;};    
           const valFundamentals = {
             sector:      $('#val-sector')?.value || null,
             eps:         getValNum('eps'),

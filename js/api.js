@@ -697,7 +697,7 @@ export async function fetchValuationFundamentals(ticker) {
   const eps    = fh.eps    ?? fmp.eps    ?? sec.eps    ?? quote.eps    ?? null;
   const pe     = fh.pe     ?? fmp.pe     ?? quote.pe                  ?? null;
   const shares = fh.shares ?? fmp.shares ?? sec.shares ?? quote.shares ?? null;
-  const growth = fh.growth ?? fmp.growth ?? quote.growth               ?? null;
+  let growth = fh.growth ?? fmp.growth ?? quote.growth               ?? null;
 
   // --- PATCH: corectare growth Yahoo --- //
   let growthFixed = growth;

@@ -323,10 +323,10 @@ async function _fetchFinnhub(ticker) {
   const toM = v => (v != null && isFinite(v)) ? v : null;
 
   const totalAssets = toM(m?.totalAssets);      // in milioane $
-  const cash        = toM(m?.cashAndEquivalents);
-  const debt        = toM(m?.totalDebt);
+  const cashFH        = toM(m?.cashAndEquivalents);
+  const debtFH        = toM(m?.totalDebt);
 
-  return { eps, pe, fcfPerShare, growth, shares, totalAssets, cash, debt };
+  return { eps, pe, fcfPerShare, growth, shares, totalAssets, cash, debt, cashFH, debtFH };
 }
 
 // ─────────────────────────────────────────────────────

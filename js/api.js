@@ -700,7 +700,7 @@ export async function fetchValuationFundamentals(ticker) {
   const pe     = fh.pe     ?? fmp.pe     ?? quote.pe                  ?? null;
   const shares = fh.shares ?? fmp.shares ?? sec.shares ?? quote.shares ?? null;
   let growth = fh.growth ?? fmp.growth ?? quote.growth               ?? null;
-  const assets = fh.totalAssets ?? fmp.totalAssets ?? sec.totalAssets ?? quote.totalAssets ?? null;
+  //const assets = fh.totalAssets ?? fmp.totalAssets ?? sec.totalAssets ?? quote.totalAssets ?? null;
   //const cash   = fh.cash        ?? fmp.cash        ?? sec.cash        ?? quote.cash        ?? null;
   //const debt   = fh.debt        ?? fmp.debt        ?? sec.debt        ?? quote.debt        ?? null;
 

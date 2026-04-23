@@ -6,7 +6,7 @@
 import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS, estimateGARCH, estimateNu } from './montecarlo.js';
 import { analyzeSentiment, fetchSectorData, fetchVIX }        from './sentiment.js';
-import { drawPriceHistory, drawSentiment, destroyAll, destroyPeriodCharts } from './charts.js';
+import { drawPriceHistory, destroyAll, destroyPeriodCharts }   from './charts.js';
 import { fetchStockData, fetchImpliedVolatility, blendSigma }  from './api.js';
 import { $, fmt, setStatus, showSection,
          setPillColor, renderSectorBadge, renderPeriod }       from './ui.js';
@@ -474,4 +474,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.example-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       $('ticker-input').value = chip.dataset.ticker;
-    }
+    });
+  });
+});

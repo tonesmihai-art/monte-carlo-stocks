@@ -588,6 +588,7 @@ async function _fetchYahooFundamentals(ticker) {
           const fd = r.financialData || {}, ks = r.defaultKeyStatistics || {}, sd = r.summaryDetail || {};
           const sharesRaw = _yv(ks.sharesOutstanding);
           const fcfTotal  = _yv(fd.freeCashflow);
+          const totalAssets = _yv(fd.totalAssets);
           const eps    = _yv(ks.trailingEps);
           const pe     = _yv(sd.trailingPE) ?? _yv(sd.forwardPE) ?? _yv(ks.trailingPE) ?? null;
           const growth = _yv(fd.earningsGrowth) != null ? _yv(fd.earningsGrowth) * 100

@@ -701,8 +701,8 @@ export async function fetchValuationFundamentals(ticker) {
   const shares = fh.shares ?? fmp.shares ?? sec.shares ?? quote.shares ?? null;
   let growth = fh.growth ?? fmp.growth ?? quote.growth               ?? null;
   const assets = fh.totalAssets ?? fmp.totalAssets ?? sec.totalAssets ?? quote.totalAssets ?? null;
-  const cash   = fh.cash        ?? fmp.cash        ?? sec.cash        ?? quote.cash        ?? null;
-  const debt   = fh.debt        ?? fmp.debt        ?? sec.debt        ?? quote.debt        ?? null;
+  //const cash   = fh.cash        ?? fmp.cash        ?? sec.cash        ?? quote.cash        ?? null;
+  //const debt   = fh.debt        ?? fmp.debt        ?? sec.debt        ?? quote.debt        ?? null;
 
   // --- PATCH: corectare growth Yahoo --- //
   let growthFixed = growth;
@@ -728,9 +728,9 @@ export async function fetchValuationFundamentals(ticker) {
   }
 
   // Bilant: Finnhub > FMP > SEC > Yahoo
-  //const totalAssets = fh.totalAssets ?? fmp.totalAssets ?? sec.totalAssets                    ?? null;
-  //const cash        = fh.cash        ?? fmp.cash        ?? sec.cash  ?? quote.cash            ?? null;
-  //const debt        = fh.debt        ?? fmp.debt        ?? sec.debt  ?? quote.debt            ?? null;
+  const totalAssets = fh.totalAssets ?? fmp.totalAssets ?? sec.totalAssets                    ?? null;
+  const cash        = fh.cash        ?? fmp.cash        ?? sec.cash  ?? quote.cash            ?? null;
+  const debt        = fh.debt        ?? fmp.debt        ?? sec.debt  ?? quote.debt            ?? null;
 
   // ── Sursa per camp (pentru afisare in UI) ─────────────
   const src4 = (fhV, fmpV, secV, quoteV) =>

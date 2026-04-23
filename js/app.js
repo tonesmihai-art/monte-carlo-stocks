@@ -6,19 +6,16 @@
 import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS, estimateGARCH, estimateNu } from './montecarlo.js';
 import { analyzeSentiment, fetchSectorData, fetchVIX }        from './sentiment.js';
-import { drawPriceHistory, destroyAll, destroyPeriodCharts,
-         drawSentiment }                                        from './charts.js';
+import { drawPriceHistory, destroyAll, destroyPeriodCharts }   from './charts.js';
 import { fetchStockData, fetchImpliedVolatility, blendSigma }  from './api.js';
 import { $, fmt, setStatus, showSection,
          setPillColor, renderSectorBadge, renderPeriod }       from './ui.js';
 import { loadIstoric, saveIstoric, loadWatchlist,
          saveToWatchlist, WATCHLIST_KEY }                      from './storage.js';
 import { initValuarePanel, generateQualityComment,
-         YAHOO_TO_VAL_SECTOR }                                 from './valuation.js';
+         YAHOO_TO_VAL_SECTOR, getLastAIScore }                from './valuation.js';
 import { captureChartsForWatchlist, renderWatchlist,
          exportWatchlistHTML, importWatchlistFiles }           from './watchlist.js';
-
-
 
 // ── Service Worker ────────────────────────────────────
 if ('serviceWorker' in navigator) {
@@ -67,12 +64,12 @@ async function runSimulation() {
   if (valPanel) {
     valPanel.style.display = 'none';
     ['eps','fcf','shares','assets','cash','debt'].forEach(id => {
-      const el = $(`#val-${id}`);
+      const el = $(`val-${id}`);
       if (el) el.value = '';
     });
-    const statusEl = $('#val-fetch-status');
+    const statusEl = $('val-fetch-status');
     if (statusEl) statusEl.textContent = '';
-    const commentEl = $('#val-fundamental-comment');
+    const commentEl = $('val-fundamental-comment');
     if (commentEl) { commentEl.innerHTML = ''; commentEl.style.display = 'none'; }
   }
   $('run-btn').disabled    = true;
@@ -352,11 +349,9 @@ async function runSimulation() {
           });
 
           // ── Date fundamentale din panelul de valuare ──
-          //const getValNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
-          //const getValNum = id => { const v = parseFloat($(`#val-${id}`)?.value);return isNaN(v) ? null : v;};
-           const getValNum = id => { const v = parseFloat($(`#val-${id}`)?.value);  return isNaN(v) ? null : v;};    
+          const getValNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
           const valFundamentals = {
-            sector:      $('#val-sector')?.value || null,
+            sector:      $('val-sector')?.value || null,
             eps:         getValNum('eps'),
             pe:          getValNum('pe'),
             fcf:         getValNum('fcf'),
@@ -367,8 +362,14 @@ async function runSimulation() {
             cash:        getValNum('cash'),
             debt:        getValNum('debt'),
             shares:      getValNum('shares'),
-            resultsHTML:        $('#val-results-grid')?.innerHTML          || '',
-            fundamentalComment: $('#val-fundamental-comment')?.innerHTML  || '',
+            resultsHTML:        $('val-results-grid')?.innerHTML          || '',
+            fundamentalComment: $('val-fundamental-comment')?.innerHTML  || '',
+            // ── Scor AI ──────────────────────────────────
+            ...(() => { const ai = getLastAIScore(); return ai ? {
+              aiTotal: ai.total, aiVerdict: ai.verdict,
+              aiFundScore: ai.fundScore, aiTechScore: ai.techScore,
+              aiConfidence: ai.confidence,
+            } : {}; })(),
           };
 
           // ── Statistici Monte Carlo per perioada ───────
@@ -415,7 +416,6 @@ async function runSimulation() {
         }
       };
     }
-
 
     // ── 7. Randare rezultate ──────────────────────────
     setStatus('');
@@ -477,5 +477,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 });
-
-

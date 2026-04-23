@@ -326,7 +326,8 @@ async function _fetchFinnhub(ticker) {
   const cashFH        = toM(m?.cashAndEquivalents);
   const debtFH        = toM(m?.totalDebt);
 
-  return { eps, pe, fcfPerShare, growth, shares, totalAssets, cash, debt, cashFH, debtFH };
+  return { eps, pe, fcfPerShare, growth, shares, totalAssets, cash: cashFH, debt: debtFH };
+
 }
 
 // ─────────────────────────────────────────────────────

@@ -68,9 +68,9 @@ async function runSimulation() {
       const el = $(`#val-${id}`);
       if (el) el.value = '';
     });
-    const statusEl = $('val-fetch-status');
+    const statusEl = $('#val-fetch-status');
     if (statusEl) statusEl.textContent = '';
-    const commentEl = $('val-fundamental-comment');
+    const commentEl = $('#val-fundamental-comment');
     if (commentEl) { commentEl.innerHTML = ''; commentEl.style.display = 'none'; }
   }
   $('run-btn').disabled    = true;

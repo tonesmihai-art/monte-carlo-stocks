@@ -9,41 +9,66 @@ function _metaNum(v) {
   return isFinite(v) ? v : null;
 }
 
-// ── Yahoo Finance via CORS proxy ─────────────────────
+// ── Yahoo Finance — multi-proxy cu fallback automat ──
 export async function fetchStockData(ticker) {
-  const url   = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`;
-  const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-  const r     = await fetch(proxy);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const data  = await r.json();
-  const result = data?.chart?.result?.[0];
-  if (!result) throw new Error('Ticker invalid sau date indisponibile');
-  const closes     = result.indicators.quote[0].close.filter(Boolean);
-  const volumes    = result.indicators.quote[0].volume || [];
-  const timestamps = result.timestamp;
-  const dates      = timestamps.map(ts =>
-    new Date(ts * 1000).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short' })
-  ).filter((_, i) => result.indicators.quote[0].close[i] != null);
-  const meta = result.meta;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`;
+  const url2 = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`;
 
-  const sharesRaw = meta.sharesOutstanding ?? null;
-  const epsRaw    = meta.epsTrailingTwelveMonths ?? null;
-  const peRaw     = meta.trailingPE ?? meta.forwardPE ?? null;
-  const sharesNum = _metaNum(sharesRaw);   // Yahoo poate returna {raw,fmt} — trebuie _metaNum
-  const fundamentals = {
-    eps:    _metaNum(epsRaw),
-    pe:     _metaNum(peRaw),
-    shares: sharesNum != null ? sharesNum / 1e6 : null,
-  };
+  const proxies = [
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url2)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url2)}`,
+  ];
 
-  return {
-    closes, dates, volumes,
-    currentPrice: closes[closes.length - 1],
-    ticker:       meta.symbol,
-    currency:     meta.currency || 'USD',
-    name:         meta.longName || meta.shortName || ticker,
-    fundamentals,
-  };
+  let lastErr = null;
+  for (const proxyUrl of proxies) {
+    try {
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 10000);
+      let data;
+      try {
+        const r = await fetch(proxyUrl, { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (!r.ok) { lastErr = new Error(`HTTP ${r.status}`); continue; }
+        data = await r.json();
+      } finally { clearTimeout(tid); }
+      const result = data?.chart?.result?.[0];
+      if (result) {
+        const closes     = result.indicators.quote[0].close.filter(Boolean);
+        const volumes    = result.indicators.quote[0].volume || [];
+        const timestamps = result.timestamp;
+        const dates      = timestamps.map(ts =>
+          new Date(ts * 1000).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short' })
+        ).filter((_, i) => result.indicators.quote[0].close[i] != null);
+        const meta = result.meta;
+
+        const sharesRaw = meta.sharesOutstanding ?? null;
+        const epsRaw    = meta.epsTrailingTwelveMonths ?? null;
+        const peRaw     = meta.trailingPE ?? meta.forwardPE ?? null;
+        const sharesNum = _metaNum(sharesRaw);
+        const fundamentals = {
+          eps:    _metaNum(epsRaw),
+          pe:     _metaNum(peRaw),
+          shares: sharesNum != null ? sharesNum / 1e6 : null,
+        };
+
+        return {
+          closes, dates, volumes,
+          currentPrice: closes[closes.length - 1],
+          ticker:   meta.symbol,
+          currency: meta.currency || 'USD',
+          name:     meta.longName || meta.shortName || ticker,
+          fundamentals,
+        };
+      }
+      lastErr = new Error('Ticker invalid sau date indisponibile');
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Nu s-au putut descarca date — toate proxy-urile au esuat');
 }
 
 // ── Volatilitate implicita din optiuni + Put/Call Skew ─

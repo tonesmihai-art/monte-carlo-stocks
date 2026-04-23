@@ -265,12 +265,34 @@ window.openWatchlistCharts = function (idx) {
         </div>`).join('')}
     </div>` : '<div style="color:rgba(255,255,255,0.3);font-size:13px;">Nu există grafice salvate.</div>';
 
+  // ── Badge AI pentru lightbox ─────────────────────────
+  const lbAiTotal   = e.valFundamentals?.aiTotal   ?? null;
+  const lbAiVerdict = e.valFundamentals?.aiVerdict ?? null;
+  const lbAiFund    = e.valFundamentals?.aiFundScore ?? null;
+  const lbAiTech    = e.valFundamentals?.aiTechScore ?? null;
+  const lbAiConf    = e.valFundamentals?.aiConfidence ?? null;
+  const lbAiColor   = lbAiVerdict === 'BUY' ? '#66bb6a' : lbAiVerdict === 'HOLD' ? '#ffee58' : lbAiVerdict === 'AVOID' ? '#ef5350' : null;
+  const lbAiBadge   = lbAiTotal != null ? `
+    <div style="display:inline-flex;align-items:center;gap:12px;padding:8px 16px;margin-top:8px;
+                background:${lbAiColor}0f;border:1px solid ${lbAiColor}33;border-radius:10px;">
+      <div style="text-align:center;">
+        <div style="font-size:26px;font-weight:800;color:${lbAiColor};line-height:1">${lbAiTotal}</div>
+        <div style="font-size:9px;color:rgba(255,255,255,0.35)">/100</div>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:800;color:${lbAiColor};letter-spacing:1px">${lbAiVerdict}</div>
+        ${lbAiConf ? `<div style="font-size:10px;color:rgba(255,255,255,0.42);margin-top:1px">Conf. ${lbAiConf}</div>` : ''}
+        <div style="font-size:10px;color:rgba(255,255,255,0.32);margin-top:1px">Fund ${lbAiFund}/100 · Tehnic ${lbAiTech}/100</div>
+      </div>
+    </div>` : '';
+
   content.innerHTML = `
     <div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.08);">
       <span style="font-size:22px;font-weight:700;color:#e0e0e0;">${e.ticker}</span>
       <span style="font-size:13px;color:rgba(255,255,255,0.40);margin-left:10px;">${e.name}</span><br>
       <span style="font-size:20px;font-weight:700;color:#4fc3f7;">${e.currency} ${e.price}</span>
       <span style="font-size:13px;color:rgba(255,255,255,0.40);margin-left:14px;">${e.date}${e.time ? ' · ' + e.time : ''}</span>
+      ${lbAiBadge}
     </div>
     ${fundHtml}
     ${gridHtml}`;
@@ -301,9 +323,22 @@ export function renderWatchlist() {
 
   cards.innerHTML = list.map((e, idx) => {
     const hasCharts = e.charts && Object.keys(e.charts).some(k => e.charts[k]);
+    const vf = e.valFundamentals;
+    const aiTotal   = vf?.aiTotal   ?? null;
+    const aiVerdict = vf?.aiVerdict ?? null;
+    const aiFund    = vf?.aiFundScore ?? null;
+    const aiTech    = vf?.aiTechScore ?? null;
+    const aiColor   = aiVerdict === 'BUY' ? '#66bb6a' : aiVerdict === 'HOLD' ? '#ffee58' : aiVerdict === 'AVOID' ? '#ef5350' : null;
+    const aiBadge   = aiTotal != null ? `
+      <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px 3px 7px;
+                   border-radius:20px;border:1px solid ${aiColor}44;background:${aiColor}12;
+                   font-size:11px;font-weight:700;color:${aiColor};margin-left:8px;">
+        ${aiVerdict} <span style="font-size:13px;font-weight:800">${aiTotal}</span>
+        <span style="font-size:9px;font-weight:400;color:rgba(255,255,255,0.35)">/100</span>
+      </span>` : '';
     return `
     <div data-idx="${idx}" draggable="true"
-         style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
+         style="background:rgba(255,255,255,0.03);border:1px solid ${aiColor ? aiColor + '22' : 'rgba(255,255,255,0.08)'};
                 border-radius:10px;padding:14px 16px;transition:opacity 0.15s,border-color 0.15s;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
         <div style="display:flex;align-items:flex-start;gap:10px;">
@@ -313,9 +348,11 @@ export function renderWatchlist() {
             <span style="font-size:16px;font-weight:700;color:#e0e0e0;">${e.ticker}</span>
             <span style="font-size:12px;color:rgba(255,255,255,0.45);margin-left:8px;">${e.name}</span>
             <span style="font-size:13px;color:#4fc3f7;margin-left:8px;font-weight:600;">${e.currency} ${e.price}</span>
+            ${aiBadge}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          ${aiTotal != null ? `<span style="font-size:9.5px;color:rgba(255,255,255,0.28);">Fund ${aiFund}/100 · Teh ${aiTech}/100</span>` : ''}
           <span style="font-size:10px;color:rgba(255,255,255,0.30);">${e.date}${e.time ? ' ' + e.time : ''}</span>
           ${hasCharts ? `<button onclick="openWatchlistCharts(${idx})"
                style="${btnBase}border:1px solid rgba(79,195,247,0.35);background:rgba(79,195,247,0.08);color:#4fc3f7;">📊 Grafice</button>` : ''}
@@ -406,6 +443,27 @@ export function exportWatchlistHTML() {
   .chart-row img{ width:49%; border-radius:6px; display:block; }`;
 
   list.forEach((e, i) => {
+    const expVf      = e.valFundamentals;
+    const expAiTotal   = expVf?.aiTotal   ?? null;
+    const expAiVerdict = expVf?.aiVerdict ?? null;
+    const expAiFund    = expVf?.aiFundScore ?? null;
+    const expAiTech    = expVf?.aiTechScore ?? null;
+    const expAiConf    = expVf?.aiConfidence ?? null;
+    const expAiColor   = expAiVerdict === 'BUY' ? '#66bb6a' : expAiVerdict === 'HOLD' ? '#ffee58' : expAiVerdict === 'AVOID' ? '#ef5350' : null;
+    const expAiBadge   = expAiTotal != null ? `
+      <div style="display:inline-flex;align-items:center;gap:12px;padding:8px 16px;margin-top:10px;
+                  background:${expAiColor}0f;border:1px solid ${expAiColor}33;border-radius:10px;">
+        <div style="text-align:center;">
+          <div style="font-size:28px;font-weight:800;color:${expAiColor};line-height:1">${expAiTotal}</div>
+          <div style="font-size:9px;color:rgba(255,255,255,0.35)">/100</div>
+        </div>
+        <div>
+          <div style="font-size:16px;font-weight:800;color:${expAiColor};letter-spacing:1px">${expAiVerdict}</div>
+          ${expAiConf ? `<div style="font-size:10px;color:rgba(255,255,255,0.42);margin-top:1px">Conf. ${expAiConf}</div>` : ''}
+          <div style="font-size:10px;color:rgba(255,255,255,0.32);margin-top:1px">Fund ${expAiFund}/100 · Tehnic ${expAiTech}/100</div>
+        </div>
+      </div>` : '';
+
     const card = `
     <div class="card">
       <div class="card-header">
@@ -413,6 +471,7 @@ export function exportWatchlistHTML() {
           <span class="ticker">${e.ticker}</span>
           <span class="name">${e.name}</span><br>
           <span class="price">${e.currency} ${e.price}</span>
+          ${expAiBadge}
         </div>
         <div style="text-align:right;">
           <span class="date">${e.date}</span>

@@ -699,6 +699,23 @@ export async function fetchValuationFundamentals(ticker) {
   const shares = fh.shares ?? fmp.shares ?? sec.shares ?? quote.shares ?? null;
   const growth = fh.growth ?? fmp.growth ?? quote.growth               ?? null;
 
+  // --- PATCH: corectare growth Yahoo --- //
+  let growthFixed = growth;
+  // Dacă Yahoo trimite earningsGrowth în loc de FCF growth
+  if (growthFixed == null && quote.earningsGrowth != null) {
+    growthFixed = quote.earningsGrowth * 100;
+  }
+  // Dacă FCF este negativ sau lipsă → growth = 0
+  if (fmp.fcfPerShare <= 0 || fh.fcfPerShare <= 0 || quote.fcfPerShare <= 0) {
+    growthFixed = 0;
+  }
+  // Limite de siguranță (Yahoo trimite uneori valori aberante)
+  if (growthFixed > 20) growthFixed = 3;   // maxim 3% dacă Yahoo dă 428%
+  if (growthFixed < -10) growthFixed = 0;  // nu folosim creștere negativă mare
+  // Suprascriem growth-ul final
+  growth = growthFixed;
+  // --- END PATCH --- //
+
   // FCF per share: Finnhub direct, sau FMP, sau calcul din fcfTotal SEC + shares disponibil
   let fcfPerShare = fh.fcfPerShare ?? fmp.fcfPerShare ?? sec.fcfPerShare ?? quote.fcfPerShare ?? null;
   if (fcfPerShare == null && sec.fcfTotal != null && shares != null && shares > 0) {

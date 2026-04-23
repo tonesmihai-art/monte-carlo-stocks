@@ -8,12 +8,33 @@
   <meta name="theme-color" content="#0a0a14" />
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="css/style.css" />
+  
   <script>
-  // Trezeste proxy-ul Render din somn
-     fetch('https://monte-carlo-proxy.onrender.com/ping')
-      .catch(() => {});
-     </script>
-     <script type="module" src="js/app.js"></script>
+  fetch('https://monte-carlo-proxy.onrender.com/ping')
+    .then(r => r.json())
+    .then(data => {
+      const msg = data.yahoo_session === 'activa'
+        ? '✅ Proxy online · Yahoo activ'
+        : '⚠️ Proxy online · Yahoo esuat';
+      const div = document.createElement('div');
+      div.textContent = msg;
+      div.style.cssText = `
+        position:fixed; bottom:20px; right:20px; z-index:99999;
+        background:#1a1a2e; border:1px solid rgba(79,195,247,0.4);
+        color:#4fc3f7; padding:10px 18px; border-radius:20px;
+        font-size:12px; font-weight:600; box-shadow:0 4px 20px rgba(0,0,0,0.5);
+        transition: opacity 1s;
+      `;
+      document.body.appendChild(div);
+      setTimeout(() => { div.style.opacity = '0'; }, 4000);
+      setTimeout(() => { div.remove(); }, 5000);
+    })
+    .catch(() => {
+      // proxy inca porneste, ignoram
+    });
+</script>
+
+  
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     /* ── Sector & VIX badges ─────────────────────────── */

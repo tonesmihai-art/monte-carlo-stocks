@@ -18,6 +18,12 @@ import { initValuarePanel, generateQualityComment,
 import { captureChartsForWatchlist, renderWatchlist,
          exportWatchlistHTML, importWatchlistFiles }           from './watchlist.js';
 
+import { calcFundamentalAI } from "./ai/ai_fundamental.js";
+import { calcTechnicalAI } from "./ai/ai_technical.js";
+import { synthesizeAI } from "./ai/ai_synthesis.js";
+import { generateSummary } from "./ai/ai_templates.js";
+
+
 // ── Service Worker ────────────────────────────────────
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
@@ -369,6 +375,7 @@ async function runSimulation() {
             fundamentalComment: $('#val-fundamental-comment')?.innerHTML  || '',
           };
 
+
           // ── Statistici Monte Carlo per perioada ───────
           const periodStats = {};
           for (const d of [30, 90, 180, 360]) {
@@ -413,6 +420,7 @@ async function runSimulation() {
         }
       };
     }
+runAIAnalysis(fundData, techData);
 
     // ── 7. Randare rezultate ──────────────────────────
     setStatus('');
@@ -474,3 +482,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 });
+
+
+function runAIAnalysis(fundData, techData) {
+    const f = calcFundamentalAI(fundData);
+    const t = calcTechnicalAI(techData);
+    const s = synthesizeAI(f, t);
+    const summary = generateSummary(f, t, s);
+    renderAI(summary);
+}
+function renderAI(summary) {
+    document.getElementById("ai-summary-card").innerHTML =
+        `<h3>${summary.headline}</h3>`;
+    document.getElementById("ai-fund-card").innerHTML =
+        summary.fundamentals.map(x => `<div>${x}</div>`).join("");
+    document.getElementById("ai-tech-card").innerHTML =
+        summary.technicals.map(x => `<div>${x}</div>`).join("");
+    document.getElementById("ai-conclusion-card").innerHTML =
+        summary.conclusion.map(x => `<div>${x}</div>`).join("");
+}
+

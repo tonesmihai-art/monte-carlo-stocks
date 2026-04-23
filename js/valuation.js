@@ -177,6 +177,37 @@ window.toggleValuare = function () {
 // ── Context tehnic (MA60, drift, sigma) ──────────────
 let _techCtx = {};
 
+// ── Scor AI 0-100 (fundamental 60% + tehnic 40%) ─────
+let _lastAIScore = null;
+export function getLastAIScore() { return _lastAIScore; }
+
+function calcAIScore(margin, deviationPct) {
+  // Fund score din marja de siguranta fundamentala
+  let fundScore = 50; // neutral daca nu avem date
+  if (margin != null) {
+    if      (margin > 30)  fundScore = 88;
+    else if (margin > 20)  fundScore = 75;
+    else if (margin > 10)  fundScore = 62;
+    else if (margin > 0)   fundScore = 50;
+    else if (margin > -10) fundScore = 37;
+    else if (margin > -20) fundScore = 25;
+    else                   fundScore = 12;
+  }
+  // Tech score din deviatia fata de MA60 (negativ = sub MA = bun)
+  let techScore = 50; // neutral daca nu avem date
+  if (deviationPct != null) {
+    if      (deviationPct < -15) techScore = 90;
+    else if (deviationPct <  -5) techScore = 72;
+    else if (deviationPct <   5) techScore = 50;
+    else if (deviationPct <  15) techScore = 30;
+    else                         techScore = 12;
+  }
+  const total      = Math.round(fundScore * 0.6 + techScore * 0.4);
+  const verdict    = total >= 70 ? 'BUY' : total >= 45 ? 'HOLD' : 'AVOID';
+  const confidence = (total >= 75 || total <= 30) ? 'Ridicată' : 'Moderată';
+  return { fundScore, techScore, total, verdict, confidence };
+}
+
 // ── Comentariu calitativ fundamental + tehnic ─────────
 
 function ensureFundComment() {
@@ -195,6 +226,24 @@ function ensureFundComment() {
 function generateFundamentalComment(weighted, curPrice, margin, sym) {
   const { deviationPct, drift, sigma, mean50 } = _techCtx;
   const hasTech = deviationPct != null;
+
+  // ── Scor AI ──────────────────────────────────────────
+  const ai = calcAIScore(margin, hasTech ? deviationPct : null);
+  _lastAIScore = ai;
+  const vc = ai.verdict === 'BUY' ? '#66bb6a' : ai.verdict === 'HOLD' ? '#ffee58' : '#ef5350';
+  const scoreBadgeHtml = `
+    <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;margin-bottom:10px;
+                background:${vc}0f;border:1px solid ${vc}33;border-radius:10px;">
+      <div style="text-align:center;min-width:52px;">
+        <div style="font-size:30px;font-weight:800;color:${vc};line-height:1">${ai.total}</div>
+        <div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.5px">/100</div>
+      </div>
+      <div>
+        <div style="font-size:17px;font-weight:800;color:${vc};letter-spacing:1.5px">${ai.verdict}</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-top:2px">Conf. ${ai.confidence}</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.32);margin-top:1px">Fund ${ai.fundScore}/100 · Tehnic ${ai.techScore}/100</div>
+      </div>
+    </div>`;
 
   // ── Verdict fundamental ──────────────────────────────
   let fundLabel, fundColor, fundAdvice;
@@ -277,6 +326,7 @@ function generateFundamentalComment(weighted, curPrice, margin, sym) {
   }
 
   return `
+    ${scoreBadgeHtml}
     <div class="vfc-title">📋 Analiză Fundamentală + Timing Tehnic</div>
     <div class="vfc-row">
       <span style="color:${fundColor};font-weight:600">${fundLabel}</span>

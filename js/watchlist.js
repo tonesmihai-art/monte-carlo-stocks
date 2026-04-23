@@ -324,7 +324,7 @@ export function renderWatchlist() {
         </div>
       </div>
       <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px;">
-        ${e.pills.map(p => `<span style="font-size:10.5px;padding:2px 8px;border-radius:12px;
+        ${(e.pills || []).map(p => `<span style="font-size:10.5px;padding:2px 8px;border-radius:12px;
              border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);
              color:rgba(255,255,255,0.65);">${p}</span>`).join('')}
       </div>
@@ -419,7 +419,7 @@ export function exportWatchlistHTML() {
           ${e.time ? `<span class="time">${e.time}</span>` : ''}
         </div>
       </div>
-      <div class="pills">${e.pills.map(p => `<span class="pill">${p}</span>`).join('')}</div>
+      <div class="pills">${(e.pills || []).map(p => `<span class="pill">${p}</span>`).join('')}</div>
       ${e.comment ? `<div class="comment">${e.comment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}</div>` : ''}
       ${(() => {
         const vf = e.valFundamentals;

@@ -297,12 +297,28 @@
           <button class="val-toggle-btn" id="val-toggle-icon">▼ Extinde</button>
         </div>
         <div id="val-content" style="display:none">
-          <div class="val-inputs-grid">
+
+          <!-- ── Nota unitati ──────────────────────────── -->
+          <div style="margin-bottom:11px;padding:7px 11px;
+                      background:rgba(255,238,88,0.05);border:1px solid rgba(255,238,88,0.18);
+                      border-radius:7px;font-size:10.5px;color:rgba(255,238,88,0.75);line-height:1.6;">
+            <strong style="color:rgba(255,238,88,0.95)">ℹ️ Unități:</strong>
+            &nbsp;Active / Cash / Datorii → <strong>milioane</strong>
+            <span style="opacity:0.65">(ex: 10 miliarde = <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px">10000</code>)</span>
+            &nbsp;·&nbsp; Acțiuni → <strong>milioane acțiuni</strong>
+            <span style="opacity:0.65">(ex: 152 mil acț = <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px">152</code>)</span>
+            &nbsp;·&nbsp; EPS / FCF → <strong>$/acțiune</strong>
+          </div>
+
+          <!-- ── Grup 1: Sector + evaluare per actiune + DCF ── -->
+          <div style="font-size:9px;font-weight:700;color:rgba(79,195,247,0.40);
+                      letter-spacing:0.8px;text-transform:uppercase;margin-bottom:5px;">
+            📊 Sector &amp; evaluare per acțiune
+          </div>
+          <div style="display:grid;grid-template-columns:1.5fr repeat(6,1fr);gap:7px;margin-bottom:12px;">
             <div class="val-input-group">
               <label for="val-sector">Sector</label>
-               <select id="val-sector">
-               <!-- opțiunile tale -->
-              
+              <select id="val-sector">
                 <option value="tech">Tech / Software</option>
                 <option value="energy">Energie (Oil&amp;Gas)</option>
                 <option value="utilitati">Utilitati / Retele</option>
@@ -315,50 +331,59 @@
               </select>
             </div>
             <div class="val-input-group">
-              <label for="val-eps">EPS (%/actiune)</label>
-              <input id="val-eps" type="number" placeholder="ex: 6.5" step="0.01">
+              <label for="val-eps">EPS ($/acț)</label>
+              <input id="val-eps" type="number" placeholder="ex: 6.50" step="0.01">
             </div>
             <div class="val-input-group">
-              <label for="val-pe">PE corect</label>
+              <label for="val-pe">P/E corect</label>
               <input id="val-pe" type="number" placeholder="ex: 18" step="0.5">
             </div>
             <div class="val-input-group">
-              <label for="val-fcf">FCF/acțiune ($)</label>
+              <label for="val-fcf">FCF/acț ($)</label>
               <input type="number" id="val-fcf" placeholder="ex: 5.20" step="0.01">
             </div>
             <div class="val-input-group">
-             <label for="val-growth">Creștere FCF (%)</label>
-             <input type="number" id="val-growth" placeholder="ex: 5" step="0.1" value="5">
+              <label for="val-growth">Creștere (%)</label>
+              <input type="number" id="val-growth" placeholder="ex: 5" step="0.1" value="5">
             </div>
             <div class="val-input-group">
               <label for="val-wacc">WACC (%)</label>
               <input type="number" id="val-wacc" placeholder="ex: 9" step="0.1" value="9">
             </div>
             <div class="val-input-group">
-              <label for="val-tgr">Rata terminală (%)</label>
+              <label for="val-tgr">TGR (%)</label>
               <input type="number" id="val-tgr" placeholder="ex: 2.5" step="0.1" value="2.5">
             </div>
+          </div>
+
+          <!-- ── Grup 2: Bilant (toate in milioane) ────── -->
+          <div style="font-size:9px;font-weight:700;color:rgba(79,195,247,0.40);
+                      letter-spacing:0.8px;text-transform:uppercase;margin-bottom:5px;">
+            🏦 Bilanț <span style="color:rgba(255,238,88,0.55);font-weight:600">(milioane — M)</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:14px;">
             <div class="val-input-group">
-              <label for="val-assets">Active totale ($M)</label>
-              <input type="number" id="val-assets" placeholder="ex: 352583" step="1">
+              <label for="val-assets">Active totale (M)</label>
+              <input type="number" id="val-assets" placeholder="ex: 10000" step="1">
             </div>
             <div class="val-input-group">
-             <label for="val-cash">Cash ($M)</label>
-             <input type="number" id="val-cash" placeholder="ex: 67150" step="1">
+              <label for="val-cash">Cash (M)</label>
+              <input type="number" id="val-cash" placeholder="ex: 1200" step="1">
             </div>
             <div class="val-input-group">
-              <label for="val-debt">Datorii ($M)</label>
-              <input type="number" id="val-debt" placeholder="ex: 108040" step="1">
+              <label for="val-debt">Datorii (M)</label>
+              <input type="number" id="val-debt" placeholder="ex: 3500" step="1">
             </div>
             <div class="val-input-group">
               <label for="val-shares">Acțiuni (M)</label>
-              <input type="number" id="val-shares" placeholder="ex: 15441" step="1">
+              <input type="number" id="val-shares" placeholder="ex: 152" step="1">
             </div>
           </div>
+
           <div id="val-results-grid" class="val-results-grid">
             <!-- populated dynamically -->
           </div>
-          <div style="margin-top:10px;font-size:9.5px;color:rgba(255,255,255,0.22);line-height:1.6;">
+          <div style="margin-top:10px;font-size:9px;color:rgba(255,255,255,0.20);line-height:1.6;">
             NAV: (Active + Cash − Datorii) / Acțiuni_M &nbsp;·&nbsp;
             DCF: FCF × (1+g)ⁿ actualizat cu WACC, 10 ani + valoare terminală &nbsp;·&nbsp;
             Marja = (Val.Ponderata − Pret) / Pret

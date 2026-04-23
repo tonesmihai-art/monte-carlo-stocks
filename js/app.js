@@ -65,7 +65,7 @@ async function runSimulation() {
   if (valPanel) {
     valPanel.style.display = 'none';
     ['eps','fcf','shares','assets','cash','debt'].forEach(id => {
-      const el = $(`val-${id}`);
+      const el = $(`#val-${id}`);
       if (el) el.value = '';
     });
     const statusEl = $('val-fetch-status');

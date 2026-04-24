@@ -366,6 +366,30 @@ export function renderWatchlist() {
              color:rgba(255,255,255,0.65);">${p}</span>`).join('')}
       </div>
       ${e.comment ? `<div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.45);line-height:1.55;">${e.comment}</div>` : ''}
+      ${(() => {
+        const vf = e.valFundamentals;
+        if (vf?.sector !== 'reit') return '';
+        const sym = e.currency === 'USD' ? '$' : e.currency + ' ';
+        const rows = [];
+        if (vf.ltv != null) {
+          const lc = vf.ltv < 30 ? '#66bb6a' : vf.ltv < 40 ? '#ffee58' : vf.ltv < 50 ? '#ffa726' : '#ef5350';
+          rows.push(`<span style="font-size:10.5px;padding:2px 9px;border-radius:12px;border:1px solid ${lc}55;color:${lc};background:${lc}10;">LTV ${vf.ltv.toFixed(1)}%</span>`);
+        }
+        if (vf.occupancy != null) {
+          const oc = vf.occupancy > 95 ? '#66bb6a' : vf.occupancy > 90 ? '#ffee58' : vf.occupancy > 85 ? '#ffa726' : '#ef5350';
+          rows.push(`<span style="font-size:10.5px;padding:2px 9px;border-radius:12px;border:1px solid ${oc}55;color:${oc};background:${oc}10;">Ocupare ${vf.occupancy.toFixed(1)}%</span>`);
+        }
+        if (vf.dividend != null) {
+          const yieldPct = (e.currentPrice > 0) ? (vf.dividend / e.currentPrice * 100).toFixed(2) : null;
+          const dc = '#4fc3f7';
+          rows.push(`<span style="font-size:10.5px;padding:2px 9px;border-radius:12px;border:1px solid ${dc}55;color:${dc};background:${dc}10;">Div. ${sym}${vf.dividend.toFixed(2)}${yieldPct ? ` · ${yieldPct}%` : ''}</span>`);
+        }
+        if (!rows.length) return '';
+        return `<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+          <span style="font-size:9.5px;color:rgba(255,255,255,0.3);letter-spacing:0.3px;">🏢 REIT</span>
+          ${rows.join('')}
+        </div>`;
+      })()}
     </div>`;
   }).join('');
 
@@ -440,7 +464,11 @@ export function exportWatchlistHTML() {
   .period-label{ font-size:10px; font-weight:600; color:rgba(255,255,255,0.35);
                  letter-spacing:0.5px; text-transform:uppercase; margin-bottom:5px; }
   .chart-row{ display:flex; gap:8px; }
-  .chart-row img{ width:49%; border-radius:6px; display:block; }`;
+  .chart-row img{ width:49%; border-radius:6px; display:block; }
+  .reit-section{ margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.08); }
+  .reit-label{ font-size:9px; font-weight:700; color:rgba(255,255,255,0.3); letter-spacing:0.5px;
+               text-transform:uppercase; margin-bottom:5px; }
+  .reit-rows{ display:flex; flex-direction:column; gap:3px; font-size:11px; }`;
 
   list.forEach((e, i) => {
     const expVf      = e.valFundamentals;
@@ -494,6 +522,29 @@ export function exportWatchlistHTML() {
             ${vf.growth!=null?`<span><span style="color:rgba(255,255,255,0.42)">Creștere: </span><b>${fmtN(vf.growth,1)}%</b></span>`:''}
             ${vf.wacc!=null?`<span><span style="color:rgba(255,255,255,0.42)">WACC: </span><b>${fmtN(vf.wacc,1)}%</b></span>`:''}
           </div>
+          ${vf.sector === 'reit' ? (() => {
+            const sym2 = e.currency === 'USD' ? '$' : e.currency + ' ';
+            const reitRows = [];
+            if (vf.ltv != null) {
+              const lc = vf.ltv < 30 ? '#66bb6a' : vf.ltv < 40 ? '#ffee58' : vf.ltv < 50 ? '#ffa726' : '#ef5350';
+              const lt = vf.ltv < 30 ? 'Excelent' : vf.ltv < 40 ? 'Bun' : vf.ltv < 50 ? 'Prudență' : 'Risc ridicat';
+              reitRows.push(`<span style="color:${lc};font-weight:600">LTV ${vf.ltv.toFixed(1)}% — ${lt}</span>`);
+            }
+            if (vf.occupancy != null) {
+              const oc = vf.occupancy > 95 ? '#66bb6a' : vf.occupancy > 90 ? '#ffee58' : vf.occupancy > 85 ? '#ffa726' : '#ef5350';
+              const ot = vf.occupancy > 95 ? 'Excelent' : vf.occupancy > 90 ? 'Bun' : vf.occupancy > 85 ? 'Atenție' : 'Slab';
+              reitRows.push(`<span style="color:${oc};font-weight:600">Ocupare ${vf.occupancy.toFixed(1)}% — ${ot}</span>`);
+            }
+            if (vf.dividend != null) {
+              const yieldPct = (e.currentPrice > 0) ? (vf.dividend / e.currentPrice * 100).toFixed(2) + '%' : '';
+              reitRows.push(`<span style="color:#4fc3f7;font-weight:600">Dividend ${sym2}${fmtN(vf.dividend)} / acț${yieldPct ? ' · yield ' + yieldPct : ''}</span>`);
+            }
+            if (!reitRows.length) return '';
+            return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);">
+              <div style="font-size:9px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:5px;">🏢 Metrici REIT</div>
+              <div style="display:flex;flex-direction:column;gap:3px;font-size:11px;">${reitRows.join('')}</div>
+            </div>`;
+          })() : ''}
         </div>`;
       })()}
       ${e.charts ? `

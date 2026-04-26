@@ -235,7 +235,7 @@
 <div id="app">
 
   <header>
-    <div class="logo">MC<span>.</span>Stocks.</span> V29</div>
+    <div class="logo">MC<span>.</span>Stocks.</span> V31-beta</div>
     <div class="tagline">Monte Carlo · 30k Simulari · Sentiment AI</div>
   </header>
 
@@ -315,14 +315,18 @@
                       letter-spacing:0.8px;text-transform:uppercase;margin-bottom:5px;">
             📊 Sector &amp; evaluare per acțiune
           </div>
-          <div style="display:grid;grid-template-columns:1.5fr repeat(6,1fr);gap:7px;margin-bottom:12px;">
+          <div style="display:grid;grid-template-columns:1.5fr repeat(8,1fr);gap:7px;margin-bottom:12px;">
             <div class="val-input-group">
               <label for="val-sector">Sector</label>
               <select id="val-sector">
                 <option value="tech">Tech / Software</option>
                 <option value="energy">Energie (Oil&amp;Gas)</option>
                 <option value="utilitati">Utilitati / Retele</option>
-                <option value="asigurari">Asigurari</option>
+                <option value="healthcare">Healthcare / Farma</option>
+                <option value="banci">Bănci</option>
+                <option value="asigurari">Asigurări</option>
+                <option value="materiale">Materiale / Miniere</option>
+                <option value="auto">Auto / Industrie auto</option>
                 <option value="conglomerate">Conglomerate / Ind.</option>
                 <option value="consum">Bunuri larg consum</option>
                 <option value="reit">REIT / Imobiliare</option>
@@ -347,12 +351,8 @@
               <input type="number" id="val-growth" placeholder="ex: 5" step="0.1" value="5">
             </div>
             <div class="val-input-group">
-              <label for="val-wacc">WACC (%)</label>
-              <input type="number" id="val-wacc" placeholder="ex: 9" step="0.1" value="9">
-            </div>
-            <div class="val-input-group">
-              <label for="val-tgr">TGR (%)</label>
-              <input type="number" id="val-tgr" placeholder="ex: 2.5" step="0.1" value="2.5">
+              <label for="val-dividend">Dividend/acț</label>
+              <input type="number" id="val-dividend" placeholder="ex: 1.20" step="0.01">
             </div>
           </div>
 
@@ -378,29 +378,56 @@
               <label for="val-shares">Acțiuni (M)</label>
               <input type="number" id="val-shares" placeholder="ex: 152" step="1">
             </div>
+            <div class="val-input-group" id="val-occupancy-group" style="opacity:0.45;transition:opacity 0.2s;">
+              <label for="val-occupancy" title="Procentul de spații închiriate din totalul disponibil — relevant doar pentru REIT-uri">Rată Ocupare (%)</label>
+              <input type="number" id="val-occupancy" placeholder="ex: 95" step="0.1" min="0" max="100">
+            </div>
+            <div class="val-input-group">
+              <label for="val-wacc" title="Costul mediu ponderat al capitalului — rata cu care se actualizează fluxurile viitoare în calculul DCF">WACC (%) <span style="font-size:8px;color:rgba(79,195,247,0.5);">↳ DCF</span></label>
+              <input type="number" id="val-wacc" placeholder="ex: 9" step="0.1" value="9">
+            </div>
+            <div class="val-input-group">
+              <label for="val-tgr" title="Rata de creștere terminală — creșterea anuală perpetuă asumată după cei 10 ani de prognoză DCF">TGR (%) <span style="font-size:8px;color:rgba(79,195,247,0.5);">↳ DCF</span></label>
+              <input type="number" id="val-tgr" placeholder="ex: 2.5" step="0.1" value="2.5">
+            </div>
           </div>
 
-          <!-- ── Grup 3: Metrici REIT — vizibil doar cand sector = reit ── -->
-          <div id="val-reit-block" style="display:none;">
+          <!-- Pret curent — folosit de AI validator (ascuns) -->
+          <span id="val-current-price" style="display:none;" data-price="" data-currency="USD"></span>
+
+          <!-- ── Grup REIT — vizibil doar cand sector = reit ── -->
+          <div id="val-reit-block" style="display:none; margin-bottom:10px;">
             <div style="font-size:9px;font-weight:700;color:rgba(79,195,247,0.40);
-                        letter-spacing:0.8px;text-transform:uppercase;margin-bottom:5px;">
-              🏢 Metrici REIT <span style="color:rgba(255,238,88,0.55);font-weight:600">(auto-completate din Yahoo)</span>
+                        letter-spacing:0.8px;text-transform:uppercase;margin-bottom:6px;">
+              🏢 Metrici REIT
+              <span style="color:rgba(255,238,88,0.5);font-weight:600;font-size:8.5px;">
+                (auto-completate din Yahoo)
+              </span>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:14px;">
+            <div style="display:grid;grid-template-columns:repeat(1,1fr);gap:7px;">
               <div class="val-input-group">
-                <label for="val-ltv">LTV % <span style="color:rgba(79,195,247,0.6);font-size:9px;">(Datorii/Active)</span></label>
-                <input type="number" id="val-ltv" placeholder="ex: 35.2" step="0.1" min="0" max="100">
-              </div>
-              <div class="val-input-group">
-                <label for="val-occupancy">Rată ocupare %</label>
-                <input type="number" id="val-occupancy" placeholder="ex: 94.5" step="0.1" min="0" max="100">
-              </div>
-              <div class="val-input-group">
-                <label for="val-dividend">Dividend / acț</label>
-                <input type="number" id="val-dividend" placeholder="ex: 3.20" step="0.01">
+                <label for="val-ltv" style="color:rgba(79,195,247,0.8);">LTV %
+                  <span style="font-size:8.5px;color:rgba(79,195,247,0.45);">(Datorii/Active)</span>
+                </label>
+                <input type="number" id="val-ltv" placeholder="ex: 35.2" step="0.1" min="0" max="100"
+                       style="border-color:rgba(79,195,247,0.3);">
               </div>
             </div>
           </div>
+
+          <!-- ── Buton Validare AI ── -->
+          <div style="margin-bottom:8px;">
+            <button id="val-ai-validate-btn" onclick="window._runAIValidation()"
+              style="display:none;padding:5px 15px;border-radius:14px;
+                     border:1px solid rgba(79,195,247,0.4);background:rgba(79,195,247,0.07);
+                     color:#4fc3f7;font-size:10.5px;font-weight:700;cursor:pointer;
+                     letter-spacing:0.3px;transition:opacity 0.2s;">
+              🤖 Validare AI
+            </button>
+          </div>
+
+          <!-- AI Validator output — populated dynamically -->
+          <div id="val-ai-validation"></div>
 
           <div id="val-results-grid" class="val-results-grid">
             <!-- populated dynamically -->
@@ -421,10 +448,6 @@
           <div style="margin-top:6px; font-size:11px; color:rgba(255,255,255,0.35); letter-spacing:0.3px; line-height:1.5;">
             Simulare Monte Carlo · 30 000 scenarii · GBM + GARCH(1,1) + Student-t · Sentiment AI
           </div>
-          <div id="quality-comment" style="display:none; margin-top:10px; padding:9px 13px;
-               border-radius:8px; border:1px solid rgba(255,255,255,0.08);
-               background:rgba(255,255,255,0.03); font-size:11.5px; line-height:1.65;
-               color:rgba(255,255,255,0.60); max-width:560px;"></div>
           <button id="save-watchlist-btn" style="display:none; margin-top:10px; padding:6px 14px;
                border-radius:20px; border:1px solid rgba(79,195,247,0.4);
                background:rgba(79,195,247,0.08); color:#4fc3f7; font-size:11.5px;
@@ -435,213 +458,6 @@
           </button>
         </div>
 
-        <div class="info-pills">
-          <div style="width:100%; margin-bottom:4px; font-size:10.5px; color:rgba(255,255,255,0.30);
-                      letter-spacing:0.5px; text-transform:uppercase; font-weight:600;">
-            Parametrii simularii &nbsp;·&nbsp; hover pe
-            <i class="tip-icon" style="pointer-events:none; vertical-align:middle;">i</i>
-            pentru detalii
-          </div>
-
-          <!-- SIGMA STATICA -->
-          <div class="pill" id="pill-sigma">
-            <span class="tip-wrap">
-              σ/zi:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>📊 Sigma zilnica (statica)</strong>
-                Media volatilitatii zilnice calculate din ultimul an de tranzactionare.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 1%/zi — calm (ETF, indici)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 1–2%/zi — normal (actiuni mari)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 2%/zi — volatil (crypto, meme)</div>
-                </div>
-                <span class="tip-impact">Influenteaza: dispersia scenariilor simulate</span>
-              </div>
-            </span>
-            <span id="info-sigma">—</span>
-          </div>
-
-          <!-- IV — VOLATILITATE IMPLICITA DIN OPTIUNI -->
-          <div class="pill" id="pill-iv">
-            <span class="tip-wrap">
-              IV opt:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>📉 Volatilitate Implicita (Optiuni)</strong>
-                Ce plateste piata <em>acum</em> pentru risc pe urmatoarele ~30 de zile — forward-looking, nu bazata pe trecut. Extrase din contractul ATM cel mai apropiat de 30 zile.
-                <div class="tip-scale" style="margin-top:5px">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> IV &lt; sigma istorica — piata calma</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> IV ≈ sigma istorica — risc normal</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> IV &gt; sigma istorica — eveniment iminent</div>
-                </div>
-                <div style="margin-top:6px;font-size:10.5px">
-                  IV are greutate <b>70%</b> pe 30 zile si scade la <b>10%</b> pe 360 zile.
-                </div>
-                <span class="tip-impact">Influenteaza: sigma in simulare, mai ales pe termen scurt</span>
-              </div>
-            </span>
-            <span id="info-iv">—</span>
-          </div>
-
-          <!-- PUT/CALL SKEW -->
-          <div class="pill" id="pill-skew">
-            <span class="tip-wrap">
-              Skew:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>📐 Put/Call Skew — Directie implicita</strong>
-                Diferenta de IV intre put-urile OTM (~7% sub pret) si call-urile OTM (~7% peste pret). Reflecta cat de mult se teme piata de o scadere vs cat spera la o crestere.
-                <div class="tip-scale" style="margin-top:5px">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 0% — call-uri mai scumpe, sentiment bullish (rar)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 0–8% — skew normal pentru actiuni</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> 8–15% — teama crescuta de scadere</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 15% — protectie impotriva crashului</div>
-                </div>
-                <div style="margin-top:6px;font-size:10.5px">
-                  Skew ridicat → drift ajustat in jos. Skew negativ (neobisnuit) → drift ajustat in sus.
-                </div>
-                <span class="tip-impact">Influenteaza: drift in ambele simulari (clasica + AI)</span>
-              </div>
-            </span>
-            <span id="info-skew">—</span>
-          </div>
-
-          <!-- GARCH ACTUAL -->
-          <div class="pill" id="pill-garch">
-            <span class="tip-wrap">
-              GARCH:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>📈 GARCH(1,1) — Volatilitate actuala</strong>
-                Volatilitatea conditionata <em>acum</em>, estimata din ultimele 60 de zile. Reflecta regimul curent al pietei, nu media istorica.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> 🟢 sub medie — piata calma</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 🟡 aproape de medie — normal</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> 🔴 peste medie — piata agitata</div>
-                </div>
-                <span class="tip-impact">Influenteaza: volatilitatea de start in simulare</span>
-              </div>
-            </span>
-            <span id="info-garch">—</span>
-          </div>
-
-          <!-- STUDENT-t ν -->
-          <div class="pill" id="pill-nu">
-            <span class="tip-wrap">
-              Fat-t:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>📉 Distributie Student-t(ν)</strong>
-                Distributia normala subestimeaza dramatic crashurile. Student-t corecteaza asta prin cozi mai groase.
-                <div class="tip-scale" style="margin-top:5px">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> ν = 3–4 — cozi f. groase (crypto)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> ν = 5–7 — cozi groase (TSLA, NVDA)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> ν = 8–15 — cozi medii (actiuni normale)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> ν &gt; 20 — practic normal (indici)</div>
-                </div>
-                <span class="tip-impact">Influenteaza: frecventa evenimentelor extreme</span>
-              </div>
-            </span>
-            <span id="info-nu">—</span>
-          </div>
-
-          <!-- VOL. ANUALA -->
-          <div class="pill" id="pill-vol">
-            <span class="tip-wrap">
-              Vol/an:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>📅 Volatilitate anualizata</strong>
-                Sigma zilnica × √252 — standardul din industrie pentru compararea riscului intre active.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 20% — actiuni stabile (JNJ, KO)</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 20–40% — volatilitate medie</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 40% — very volatile (crypto, meme)</div>
-                </div>
-                <span class="tip-impact">Indicator general de risc al activului</span>
-              </div>
-            </span>
-            <span id="info-vol">—</span>
-          </div>
-
-          <!-- PERSISTENTA GARCH -->
-          <div class="pill" id="pill-pers">
-            <span class="tip-wrap">
-              Pers:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>🔄 Persistenta GARCH (α+β)</strong>
-                Cat de "lipicioasa" e volatilitatea — cat timp dureaza un soc pana se disipa.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 85% — socurile dispar rapid</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 85–95% — volatilitate persistenta</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 95% — soc dureaza saptamani</div>
-                </div>
-                <span class="tip-impact">Influenteaza: viteza de normalizare dupa soc</span>
-              </div>
-            </span>
-            <span id="info-pers">—</span>
-          </div>
-
-          <!-- DRIFT -->
-          <div class="pill" id="pill-drift">
-            <span class="tip-wrap">
-              Drift:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble">
-                <strong>📈 Drift — Tendinta zilnica</strong>
-                Directia medie a pretului per zi din ultimul an. Influenteaza direct unde se concentreaza simularile.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &gt; 0 — tendinta de crestere</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> ≈ 0 — piata laterala</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &lt; 0 — tendinta de scadere</div>
-                </div>
-                <span class="tip-impact">Influenteaza: media preturilor simulate</span>
-              </div>
-            </span>
-            <span id="info-drift">—</span>
-          </div>
-
-          <!-- MA60 -->
-          <div class="pill" id="pill-ma60">
-            <span class="tip-wrap">
-              MA60:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble tip-left">
-                <strong>〰️ Media mobila 60 zile</strong>
-                Cat de departe e pretul curent fata de media pe 60 de zile. Deviatia mare declanseaza mean reversion in simulare.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 5% — pret aproape de medie</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 5–15% — deviere moderata</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 15% — deviere semnificativa</div>
-                </div>
-                <span class="tip-impact">Influenteaza: mean reversion in GBM</span>
-              </div>
-            </span>
-            <span id="info-ma50">—</span>
-          </div>
-
-          <!-- VOL TREND -->
-          <div class="pill" id="pill-voltren">
-            <span class="tip-wrap">
-              Vol:
-              <i class="tip-icon">i</i>
-              <div class="tip-bubble tip-left">
-                <strong>🔊 Trend volum tranzactionare</strong>
-                Volumul din ultimele 10 zile vs media pe 30 de zile, corelat cu directia pretului.
-                <div class="tip-scale">
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Bullish — volum mare + pret sus</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> Neutral — fara confirmare</div>
-                  <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Bearish — volum mare + pret jos</div>
-                </div>
-                <span class="tip-impact">Influenteaza: ajustarea drift-ului AI</span>
-              </div>
-            </span>
-            <span id="info-voltren">—</span>
-          </div>
-
-        </div>
         <div id="stock-price" class="stock-price">—</div>
       </div>
 
@@ -752,6 +568,7 @@
     });
   }
 </script>
-<script type="module" src="js/app.js"></script>
+<script type="module" src="./js/app.js"></script>
+<!script type="module" src="/Monte-Carlo-stock-Beta/js/app.js"><!/script>
 </body>
 </html>

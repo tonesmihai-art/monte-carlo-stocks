@@ -6,14 +6,14 @@
 import { calcParams, simulate, calcStats, percentilesPerDay,
          adjustParams, NUM_SIMS, estimateGARCH, estimateNu } from './montecarlo.js';
 import { analyzeSentiment, fetchSectorData, fetchVIX }        from './sentiment.js';
-import { drawPriceHistory, destroyAll, destroyPeriodCharts }   from './charts.js';
+import { drawPriceHistory, drawSentiment, destroyAll, destroyPeriodCharts } from './charts.js';
 import { fetchStockData, fetchImpliedVolatility, blendSigma }  from './api.js';
 import { $, fmt, setStatus, showSection,
          setPillColor, renderSectorBadge, renderPeriod }       from './ui.js';
 import { loadIstoric, saveIstoric, loadWatchlist,
          saveToWatchlist, WATCHLIST_KEY }                      from './storage.js';
-import { initValuarePanel, generateQualityComment,
-         YAHOO_TO_VAL_SECTOR, getLastAIScore }                from './valuation.js';
+import { initValuarePanel, generateQualityComment, renderSimulationSection,
+         YAHOO_TO_VAL_SECTOR, getLastAIScore, getLastValResult } from './valuation.js';
 import { captureChartsForWatchlist, renderWatchlist,
          exportWatchlistHTML, importWatchlistFiles }           from './watchlist.js';
 
@@ -22,8 +22,27 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 
+// ── Mapping cheie internă → nume afișat în badge ─────
+const VAL_SECTOR_DISPLAY = {
+  tech:         'Technology',
+  energy:       'Energy',
+  utilitati:    'Utilities',
+  healthcare:   'Healthcare',
+  banci:        'Financial Services',
+  asigurari:    'Insurance',
+  materiale:    'Basic Materials',
+  auto:         'Auto / Industrials',
+  conglomerate: 'Industrials',
+  consum:       'Consumer',
+  reit:         'Real Estate',
+  shipping:     'Shipping / Transport',
+  tutun:        'Consumer Defensive',
+};
+
 // ── State global ─────────────────────────────────────
-let currentResult = null;
+let currentResult      = null;
+let _lastVixData       = null;
+let _lastSectorWeights = null;
 
 // ── Istoric simulari ──────────────────────────────────
 
@@ -92,47 +111,7 @@ async function runSimulation() {
     const sigmaStaticPct = (sigma * 100).toFixed(3);
     const volAnualPct    = sigma * Math.sqrt(252) * 100;
 
-    // ── Pills individuale cu culori dinamice ──────────
-    setPillColor('pill-sigma', sigma < 0.01 ? 'green' : sigma < 0.02 ? 'yellow' : 'red');
-    $('info-sigma').textContent = `${sigmaStaticPct}%/zi`;
-
-    if (garch) {
-      const sigmaGarchPct = (garch.sigma0 * 100).toFixed(3);
-      const garchRegime   = garch.sigma0 > garch.sigmaLR * 1.15 ? 'red'
-                          : garch.sigma0 < garch.sigmaLR * 0.85 ? 'green' : 'yellow';
-      setPillColor('pill-garch', garchRegime);
-      $('info-garch').textContent = `${sigmaGarchPct}%/zi ${{ red:'🔴', green:'🟢', yellow:'🟡' }[garchRegime]}`;
-      const persColor = garch.persistence < 0.85 ? 'green' : garch.persistence < 0.95 ? 'yellow' : 'red';
-      setPillColor('pill-pers', persColor);
-      $('info-pers').textContent = `${(garch.persistence * 100).toFixed(1)}%`;
-    } else {
-      setPillColor('pill-garch', 'gray'); $('info-garch').textContent = 'N/A';
-      setPillColor('pill-pers',  'gray'); $('info-pers').textContent  = 'N/A';
-    }
-
-    const nuColor = nu < 5 ? 'red' : nu < 8 ? 'orange' : nu < 20 ? 'yellow' : 'green';
-    const nuLabel = nu >= 29 ? `ν=${nu} normal`
-                  : nu >= 10 ? `ν=${nu} medii`
-                  : nu >= 5  ? `ν=${nu} groase`
-                  :            `ν=${nu} f.groase`;
-    setPillColor('pill-nu', nuColor);
-    $('info-nu').textContent = nuLabel;
-
-    setPillColor('pill-vol', volAnualPct < 20 ? 'green' : volAnualPct < 40 ? 'yellow' : 'red');
-    $('info-vol').textContent = `${volAnualPct.toFixed(1)}%/an`;
-
-    setPillColor('pill-drift', drift > 0.0001 ? 'green' : drift < -0.0001 ? 'red' : 'gray');
-    $('info-drift').textContent = `${drift >= 0 ? '+' : ''}${(drift * 100).toFixed(4)}%/zi`;
-
-    const absDev = Math.abs(deviationPct);
-    setPillColor('pill-ma60', absDev < 5 ? 'green' : absDev < 15 ? 'yellow' : 'red');
-    $('info-ma50').textContent = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
-
-    const vtDetail = volumeTrend?.detail ?? '';
-    setPillColor('pill-voltren',
-      vtDetail === 'bullish' ? 'green' : vtDetail === 'bearish' ? 'red' :
-      vtDetail.includes('bullish') ? 'yellow' : vtDetail.includes('bearish') ? 'orange' : 'gray');
-    $('info-voltren').textContent = volumeTrend?.label ?? '—';
+    // ── Parametrii sunt afisati in sectiunea "Simulare cu param: σ" din panoul de valuare ──
 
     // ── 2b. IV + Sector + VIX in paralel ────────────
     setStatus('Caut IV, sector si VIX in paralel...');
@@ -148,11 +127,19 @@ async function runSimulation() {
       if (ivResult.status === 'fulfilled')     ivData        = ivResult.value;
       if (sectorResult.status === 'fulfilled') sectorWeights = sectorResult.value.weights;
       if (vixResult.status === 'fulfilled')    vixData       = vixResult.value;
+      _lastVixData = vixData;
       if (sectorResult.status === 'fulfilled') {
-        renderSectorBadge(sectorResult.value.sector, sectorResult.value.industry,
-                          vixData, sectorResult.value.weights);
-        initValuarePanel(currentPrice, currency, sectorResult.value.sector, ticker, fundamentals,
+        _lastSectorWeights = sectorResult.value.weights;
+        const detectedSector = sectorResult.value.sector;
+        initValuarePanel(currentPrice, currency, detectedSector, ticker, fundamentals,
                          { deviationPct, drift, sigma, mean50 });
+        // Arata sectorul in badge doar daca a fost detectat; altfel doar VIX
+        const valKey = $('val-sector')?.value || 'tech';
+        const displaySector = (detectedSector && detectedSector !== 'Unknown')
+          ? (VAL_SECTOR_DISPLAY[valKey] || valKey)
+          : null;
+        renderSectorBadge(displaySector,
+                          sectorResult.value.industry, vixData, sectorResult.value.weights);
       } else {
         initValuarePanel(currentPrice, currency, null, ticker, fundamentals,
                          { deviationPct, drift, sigma, mean50 });
@@ -190,18 +177,6 @@ async function runSimulation() {
       } catch (_) {}
     }
 
-    if (ivData) {
-      const ivAnnPct = (ivData.ivAnnual * 100).toFixed(1);
-      const ivRatio  = ivData.ivDaily / sigma;
-      setPillColor('pill-iv', ivRatio < 0.85 ? 'green' : ivRatio < 1.20 ? 'yellow' : 'red');
-      $('info-iv').textContent = ivEstimated
-        ? `~${ivAnnPct}%/an est.`
-        : `${ivAnnPct}%/an · ${ivData.daysToExp}z`;
-    } else {
-      setPillColor('pill-iv', 'gray');
-      $('info-iv').textContent = 'N/A';
-    }
-
     // ── Put/Call Skew → ajustare drift ───────────────
     let skewDriftAdj = 0;
     if (ivData?.skewData) {
@@ -210,24 +185,10 @@ async function runSimulation() {
       const sigmaAnnual    = sigma * Math.sqrt(252);
       const normalizedSkew = (skew - NEUTRAL_SKEW) / Math.max(sigmaAnnual, 0.15);
       skewDriftAdj = -Math.tanh(normalizedSkew * 1.5) * 0.00025;
-
-      const skewPct   = (skew * 100).toFixed(1);
-      const skewColor = skew < 0 ? 'green' : skew < 0.08 ? 'yellow' : skew < 0.15 ? 'orange' : 'red';
-      setPillColor('pill-skew', skewColor);
-      $('info-skew').textContent = ivEstimated
-        ? `~${skew >= 0 ? '+' : ''}${skewPct}% est.`
-        : `${skew >= 0 ? '+' : ''}${skewPct}%`;
-    } else {
-      setPillColor('pill-skew', 'gray');
-      $('info-skew').textContent = 'N/A';
     }
 
-    // ── Comentariu calitativ ─────────────────────────
-    const qComment = generateQualityComment({
-      sigma, volAnualPct, nu, garch, drift, deviationPct, volumeTrend, ivData, ivEstimated,
-    });
-    const qEl = $('quality-comment');
-    if (qEl) { qEl.innerHTML = qComment; qEl.style.display = 'block'; }
+    // ── Sectiunea "Simulare cu param: σ" in panoul de valuare ──
+    renderSimulationSection({ sigma, volAnualPct, nu, garch, drift, deviationPct, volumeTrend, ivData, ivEstimated, mean50 });
 
     let sigmaAdjRatio = null;
 
@@ -337,15 +298,12 @@ async function runSimulation() {
         saveBtn.disabled    = true;
         try {
           const charts = await captureChartsForWatchlist(periodResults, currentPrice, ticker);
-          const pills  = [];
-          [['pill-sigma','info-sigma'],['pill-iv','info-iv'],['pill-skew','info-skew'],
-           ['pill-garch','info-garch'],['pill-nu','info-nu'],['pill-vol','info-vol'],
-           ['pill-pers','info-pers'],['pill-drift','info-drift'],
-           ['pill-ma60','info-ma50'],['pill-voltren','info-voltren'],
-          ].forEach(([pid, vid]) => {
-            const label = document.querySelector(`#${pid} .tip-wrap`)?.childNodes[0]?.textContent?.trim() || pid;
-            const val   = $(vid)?.textContent || '—';
-            pills.push(`${label} ${val}`);
+          // Parametrii sunt in sectiunea val-sim-section — colectam textul compact
+          const pills = [];
+          document.querySelectorAll('#val-sim-section span[style*="border-radius:20px"]').forEach(el => {
+            const label = el.querySelector('.tip-wrap')?.childNodes[0]?.textContent?.trim() || '';
+            const val   = el.querySelector('span[style*="font-weight:600"]')?.textContent?.trim() || '—';
+            if (label) pills.push(`${label} ${val}`);
           });
 
           // ── Date fundamentale din panelul de valuare ──
@@ -362,9 +320,14 @@ async function runSimulation() {
             cash:        getValNum('cash'),
             debt:        getValNum('debt'),
             shares:      getValNum('shares'),
+            dividend:    getValNum('dividend'),
             ltv:         getValNum('ltv'),
             occupancy:   getValNum('occupancy'),
-            dividend:    getValNum('dividend'),
+            // ── Rezultat calculat (val. ponderată + marjă) ──
+            ...(() => { const vr = getLastValResult(); return vr ? {
+              weightedValue:  vr.weightedValue,
+              marginOfSafety: vr.marginOfSafety,
+            } : {}; })(),
             resultsHTML:        $('val-results-grid')?.innerHTML          || '',
             fundamentalComment: $('val-fundamental-comment')?.innerHTML  || '',
             // ── Scor AI ──────────────────────────────────
@@ -402,7 +365,7 @@ async function runSimulation() {
             date:    now.toLocaleDateString('ro-RO',  { day:'2-digit', month:'short', year:'numeric' }),
             time:    now.toLocaleTimeString('ro-RO',  { hour:'2-digit', minute:'2-digit' }),
             pills,
-            comment:         $('quality-comment')?.innerHTML || '',
+            comment:         document.getElementById('val-sim-section')?.innerHTML || '',
             charts,
             valFundamentals,
             periodStats,
@@ -478,5 +441,12 @@ document.addEventListener('DOMContentLoaded', () => {
     chip.addEventListener('click', () => {
       $('ticker-input').value = chip.dataset.ticker;
     });
+  });
+
+  // ── Sync badge la schimbarea manuala a sectorului ────
+  $('val-sector')?.addEventListener('change', () => {
+    const valKey = $('val-sector').value;
+    renderSectorBadge(VAL_SECTOR_DISPLAY[valKey] || valKey,
+                      null, _lastVixData, _lastSectorWeights);
   });
 });

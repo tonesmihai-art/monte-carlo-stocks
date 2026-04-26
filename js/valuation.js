@@ -18,6 +18,11 @@ const VAL_SECTOR_WEIGHTS = {
   tech:         { eps: 0.20, fcf: 0.15, nav: 0.10, dcf: 0.55 },
   reit:         { eps: 0.10, fcf: 0.35, nav: 0.40, dcf: 0.15 },
   shipping:     { eps: 0.20, fcf: 0.35, nav: 0.15, dcf: 0.30 },
+  // ── Sectoare noi ─────────────────────────────────────
+  healthcare:   { eps: 0.30, fcf: 0.20, nav: 0.05, dcf: 0.45 }, // Farma/sanatate: DCF + EPS dominante, book value irelevant
+  banci:        { eps: 0.35, fcf: 0.05, nav: 0.50, dcf: 0.10 }, // Banci: P/Book dominant, FCF neaplicabil
+  materiale:    { eps: 0.20, fcf: 0.30, nav: 0.25, dcf: 0.25 }, // Miniere/materiale: asset-heavy + ciclic
+  auto:         { eps: 0.20, fcf: 0.25, nav: 0.25, dcf: 0.30 }, // Auto: capex masiv, ciclic, toate metodele relevante
 };
 
 export const YAHOO_TO_VAL_SECTOR = {
@@ -25,19 +30,23 @@ export const YAHOO_TO_VAL_SECTOR = {
   'Communication Services': 'tech',
   'Energy':                 'energy',
   'Utilities':              'utilitati',
-  'Financial Services':     'asigurari',
+  'Financial Services':     'banci',
   'Insurance':              'asigurari',
   'Real Estate':            'reit',
   'Industrials':            'conglomerate',
-  'Healthcare':             'conglomerate',
-  'Basic Materials':        'conglomerate',
+  'Healthcare':             'healthcare',
+  'Basic Materials':        'materiale',
   'Consumer Defensive':     'consum',
   'Consumer Cyclical':      'consum',
+  // ── Mapari suplimentare Yahoo ─────────────────────────
+  'Consumer Discretionary': 'consum',
+  'Auto Manufacturers':     'auto',
+  'Automobiles':            'auto',
 };
 
 // ── Calcul valuare — 4 metode ─────────────────────────
 
-function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shares, sector, dividend }) {
+function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shares, sector }) {
   const w = VAL_SECTOR_WEIGHTS[sector] || VAL_SECTOR_WEIGHTS.tech;
 
   const valEPS = (eps > 0 && pe > 0) ? eps * pe : null;
@@ -45,12 +54,6 @@ function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shar
   const valNAV = (assets != null && cash != null && debt != null && shares > 0)
     ? (assets + cash - debt) / shares
     : null;
-  // DDM (Gordon Growth) — folosit cu pondere ridicata pentru REIT
-  let valDDM = null;
-  if (dividend > 0 && wacc != null && tgr != null && wacc > tgr) {
-    const r = wacc / 100, g = tgr / 100;
-    valDDM = dividend / (r - g);
-  }
 
   let valDCF = null;
   let growthCapped = false;
@@ -69,14 +72,9 @@ function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shar
     valDCF = dcfSum + terminalPV;
   }
 
-  const wDDM = sector === 'reit' ? 0.35 : 0.05;  // REIT: DDM are pondere mare
-  const wDCF = sector === 'reit' ? (w.dcf * 0.5) : w.dcf;  // DCF mai mic pt REIT
   const methods = [
-    { val: valEPS, w: w.eps },
-    { val: valFCF, w: w.fcf },
-    { val: valNAV, w: w.nav },
-    { val: valDCF, w: wDCF  },
-    { val: valDDM, w: wDDM  },
+    { val: valEPS, w: w.eps }, { val: valFCF, w: w.fcf },
+    { val: valNAV, w: w.nav }, { val: valDCF, w: w.dcf },
   ];
   const avail = methods.filter(m => m.val != null && isFinite(m.val));
   let weighted = null;
@@ -84,7 +82,7 @@ function calcValuare({ eps, pe, fcf, growth, wacc, tgr, assets, cash, debt, shar
     const totalW = avail.reduce((s, m) => s + m.w, 0);
     weighted = avail.reduce((s, m) => s + m.val * m.w / totalW, 0);
   }
-  return { valEPS, valFCF, valNAV, valDCF, valDDM, weighted, w, growthCapped };
+  return { valEPS, valFCF, valNAV, valDCF, weighted, w, growthCapped };
 }
 
 // ── Actualizeaza UI dupa orice modificare input ───────
@@ -105,13 +103,49 @@ export function updateValuare() {
     growth: getNum('growth'), wacc: getNum('wacc'), tgr: getNum('tgr'),
     assets: getNum('assets'), cash: getNum('cash'), debt: getNum('debt'),
     shares: getNum('shares'),
-    dividend:   getNum('dividend'),
-    ltv:        getNum('ltv'),
-    occupancy:  getNum('occupancy'),
+    dividend:  getNum('dividend'),
+    ltv:       getNum('ltv'),
+    occupancy: getNum('occupancy'),
   };
-  // Arata/ascunde campurile REIT
-  const reitBlock = document.getElementById('val-reit-block');
-  if (reitBlock) reitBlock.style.display = sector === 'reit' ? 'contents' : 'none';
+
+  // ── Nota explicativa REIT + FCF negativ ──────────────
+  const isReit = sector === 'reit';
+  let fcfNoteEl = document.getElementById('val-fcf-reit-note');
+  if (!fcfNoteEl) {
+    fcfNoteEl = document.createElement('div');
+    fcfNoteEl.id = 'val-fcf-reit-note';
+    fcfNoteEl.style.cssText = 'font-size:10px;color:#ffee58;background:rgba(255,238,88,0.07);border-left:2px solid #ffee58;padding:5px 10px;margin:4px 0 6px 0;border-radius:0 4px 4px 0;line-height:1.5;display:none;';
+    // Insereaza dupa randul cu sector/EPS (parintele input-ului sector)
+    const sectorRow = $('val-sector')?.closest('.val-input-group')?.parentElement;
+    if (sectorRow?.parentElement) sectorRow.parentElement.insertBefore(fcfNoteEl, sectorRow.nextSibling);
+  }
+  if (fcfNoteEl) {
+    if (isReit && inputs.fcf != null && inputs.fcf < 0) {
+      fcfNoteEl.textContent = '⚠ FCF negativ la REIT: capex-ul depășește cash-ul operațional — normal în faza de expansiune/investiții. NAV și dividendul sunt indicatorii relevanți, nu FCF-ul.';
+      fcfNoteEl.style.display = 'block';
+    } else {
+      fcfNoteEl.style.display = 'none';
+    }
+  }
+
+  // ── Rată Ocupare: vizibil pt REIT, fade 0.45 altfel ──
+  const occupancyGroup = document.getElementById('val-occupancy-group');
+  if (occupancyGroup) {
+    occupancyGroup.style.opacity      = isReit ? '1' : '0.45';
+    occupancyGroup.style.pointerEvents = isReit ? 'auto' : 'none';
+  }
+
+
+  // Calculeaza si afiseaza dividend yield automat
+  const priceForYield = curPrice || 0;
+  const yieldEl = $('val-div-yield');
+  const yieldCalcEl = $('val-div-yield-calc');
+  if (inputs.dividend > 0 && priceForYield > 0) {
+    const yieldPct = (inputs.dividend / priceForYield) * 100;
+    if (yieldEl) yieldEl.value = yieldPct.toFixed(2);
+  } else {
+    if (yieldEl) yieldEl.value = '';
+  }
 
   const { valEPS, valFCF, valNAV, valDCF, valDDM, weighted, w, growthCapped } = calcValuare({ ...inputs, sector });
 
@@ -160,6 +194,14 @@ export function updateValuare() {
   const grid = $('val-results-grid');
   if (!grid) return;
 
+  // ── Salveaza rezultatul curent pentru watchlist ───────
+  _lastValResult = {
+    weightedValue:  weighted,
+    marginOfSafety: (weighted != null && curPrice > 0)
+      ? (weighted - curPrice) / curPrice * 100
+      : null,
+  };
+
   // ── Comentariu calitativ fundamental + tehnic ────────
   const commentEl = ensureFundComment();
   if (commentEl) {
@@ -170,33 +212,276 @@ export function updateValuare() {
     commentEl.style.display = 'block';
   }
 
-  const formulaDDM = inputs.dividend > 0 && inputs.wacc != null && inputs.tgr != null
-    ? `D ${sym}${inputs.dividend.toFixed(2)} / (WACC ${inputs.wacc}% − g ${inputs.tgr}%) = ${fv(valDDM)}`
-    : 'Necesita Dividend/acț, WACC, rată terminală';
-
-  const reitInfoHtml = sector === 'reit' ? `
-    <div class="val-reit-info">
-      ${inputs.ltv != null ? `<span class="reit-badge" style="color:${inputs.ltv < 30 ? '#66bb6a' : inputs.ltv < 40 ? '#ffee58' : inputs.ltv < 50 ? '#ffa726' : '#ef5350'}">
-        LTV ${inputs.ltv.toFixed(1)}% ${inputs.ltv < 30 ? '✔ Excelent' : inputs.ltv < 40 ? '✓ Bun' : inputs.ltv < 50 ? '⚠ Prudență' : '✘ Risc ridicat'}</span>` : ''}
-      ${inputs.occupancy != null ? `<span class="reit-badge" style="color:${inputs.occupancy > 95 ? '#66bb6a' : inputs.occupancy > 90 ? '#ffee58' : inputs.occupancy > 85 ? '#ffa726' : '#ef5350'}">
-        Ocupare ${inputs.occupancy.toFixed(1)}% ${inputs.occupancy > 95 ? '✔ Excelent' : inputs.occupancy > 90 ? '✓ Bun' : inputs.occupancy > 85 ? '⚠ Atenție' : '✘ Slab'}</span>` : ''}
-      ${inputs.dividend != null ? `<span class="reit-badge" style="color:#4fc3f7">Dividend ${sym}${inputs.dividend.toFixed(2)}/acț</span>` : ''}
-    </div>` : '';
+  // ── Card dividend — calculat o singura data ──────────
+  const _hasDiv   = inputs.dividend != null && inputs.dividend > 0;
+  const _yieldPct = _hasDiv && priceForYield > 0 ? (inputs.dividend / priceForYield * 100) : null;
+  const _dyColor  = !_yieldPct     ? '#888'
+                  : _yieldPct < 2  ? '#ffee58'
+                  : _yieldPct < 6  ? '#66bb6a'
+                  : _yieldPct < 10 ? '#ffa726'
+                  :                   '#ef5350';
+  const _dyLabel  = !_yieldPct     ? ''
+                  : _yieldPct < 2  ? 'Redus'
+                  : _yieldPct < 6  ? 'Atractiv'
+                  : _yieldPct < 10 ? 'Ridicat — verifică sustenabilitatea'
+                  :                   'Excesiv — posibil yield trap';
+  const dividendCardHtml = _hasDiv
+    ? `<div class="val-method-card" style="border-color:${_dyColor}33;background:${_dyColor}06;">
+        <div class="vm-label">Dividend Info</div>
+        <div class="vm-val" style="color:${_dyColor}">${sym}${fmt(inputs.dividend)}<span style="font-size:10px;">/acț</span></div>
+        ${_yieldPct ? `<div style="font-size:10px;color:${_dyColor};margin-top:3px;font-weight:600">${_yieldPct.toFixed(2)}% yield — ${_dyLabel}</div>` : ''}
+        <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;">Dividend anual / acțiune</div>
+      </div>`
+    : `<div class="val-method-card" style="opacity:0.45;border-color:rgba(136,136,136,0.18);background:rgba(136,136,136,0.04);">
+        <div class="vm-label" style="color:rgba(255,255,255,0.35);">Dividend Info</div>
+        <div class="vm-val" style="color:rgba(255,255,255,0.28);font-size:13px;">Fără dividend</div>
+        <div class="vm-weight" style="color:rgba(255,255,255,0.18);">—</div>
+      </div>`;
 
   grid.innerHTML = `
-    ${reitInfoHtml}
     ${card('Val. PE',  valEPS, formulaEPS, w.eps)}
     ${card('Val. FCF', valFCF, formulaFCF, w.fcf)}
     ${card('Val. NAV', valNAV, formulaNAV, w.nav)}
     ${card('Val. DCF', valDCF, formulaDCF, w.dcf)}
-    ${sector === 'reit' ? card('Val. DDM', valDDM, formulaDDM, 0.35) : ''}
     <div class="val-weighted-card">
       <div class="vm-label">Val. Medie Ponderată</div>
       <div class="vm-val">${fv(weighted)}</div>
       <div class="vm-weight">Preț curent: ${sym}${curPrice > 0 ? curPrice.toFixed(2) : '—'}</div>
     </div>
-    ${marginHtml}`;
+    ${marginHtml}
+    ${dividendCardHtml}
+    ${(() => {
+      // ── Card Rată Ocupare ─────────────────────────────
+      const isReit   = sector === 'reit';
+      const occ      = inputs.occupancy;
+      const hasOcc   = occ != null && occ > 0;
+      const occColor = !hasOcc    ? 'rgba(79,195,247,0.6)'
+                     : occ >= 92 ? '#66bb6a'
+                     : occ >= 80 ? '#ffee58'
+                     : occ >= 65 ? '#ffa726'
+                     :              '#ef5350';
+      const occLabel = !hasOcc    ? ''
+                     : occ >= 92 ? 'Excelent'
+                     : occ >= 80 ? 'Bun'
+                     : occ >= 65 ? 'Moderat — urmărește tendința'
+                     :              'Scăzut — risc venituri';
+      const fadeStyle = isReit ? '' : 'opacity:0.45;';
+      const occCard = !hasOcc
+        ? `<div class="val-method-card" style="${fadeStyle}border-color:rgba(79,195,247,0.18);background:rgba(79,195,247,0.03);">
+            <div class="vm-label" style="color:rgba(79,195,247,0.5);">Rată Ocupare</div>
+            <div class="vm-val" style="color:rgba(255,255,255,0.28);font-size:13px;">${isReit ? 'Lipsă' : '—'}</div>
+            <div class="vm-weight" style="color:rgba(255,255,255,0.18);">% spații închiriate / total</div>
+          </div>`
+        : `<div class="val-method-card" style="${fadeStyle}border-color:${occColor}33;background:${occColor}08;">
+            <div class="vm-label" style="color:${occColor}cc;">Rată Ocupare</div>
+            <div class="vm-val" style="color:${occColor}">${occ.toFixed(1)}<span style="font-size:11px;">%</span></div>
+            <div style="font-size:10px;color:${occColor};margin-top:3px;font-weight:600">${occLabel}</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;">% spații închiriate / total</div>
+          </div>`;
+
+      // ── Card LTV ─────────────────────────────────────
+      // LTV = Datorii / Active × 100 — masoara levierul financiar al REIT-ului
+      // Afisam valoarea DOAR pentru REIT — pentru altele fortat la "—"
+      const ltv    = isReit ? inputs.ltv : null;
+      const hasLtv = ltv != null && ltv > 0;
+      const ltvColor = !hasLtv    ? 'rgba(79,195,247,0.6)'
+                     : ltv < 30  ? '#66bb6a'
+                     : ltv < 45  ? '#a5d6a7'
+                     : ltv < 55  ? '#ffee58'
+                     : ltv < 65  ? '#ffa726'
+                     :              '#ef5350';
+      const ltvLabel = !hasLtv    ? ''
+                     : ltv < 30  ? 'Conservator — risc scăzut'
+                     : ltv < 45  ? 'Sănătos — nivel optim'
+                     : ltv < 55  ? 'Moderat — monitorizează'
+                     : ltv < 65  ? 'Ridicat — presiune financiară'
+                     :              'Periculos — risc refinanțare';
+      const ltvCard = !hasLtv
+        ? `<div class="val-method-card" style="${fadeStyle}border-color:rgba(79,195,247,0.18);background:rgba(79,195,247,0.03);">
+            <div class="vm-label" style="color:rgba(79,195,247,0.5);">LTV <span style="font-size:8px;opacity:0.6;">(Loan-to-Value)</span></div>
+            <div class="vm-val" style="color:rgba(255,255,255,0.28);font-size:13px;">${isReit ? 'Lipsă' : '—'}</div>
+            <div class="vm-weight" style="color:rgba(255,255,255,0.18);">Datorii / Active totale</div>
+          </div>`
+        : `<div class="val-method-card" style="${fadeStyle}border-color:${ltvColor}33;background:${ltvColor}08;">
+            <div class="vm-label" style="color:${ltvColor}cc;">LTV <span style="font-size:8px;opacity:0.7;">(Loan-to-Value)</span></div>
+            <div class="vm-val" style="color:${ltvColor}">${ltv.toFixed(1)}<span style="font-size:11px;">%</span></div>
+            <div style="font-size:10px;color:${ltvColor};margin-top:3px;font-weight:600">${ltvLabel}</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;">Datorii / Active totale</div>
+          </div>`;
+
+      return occCard + ltvCard;
+    })()}`;
 }
+
+// ── Validare AI prin proxy ────────────────────────────
+
+const MY_PROXY_VAL = 'https://monte-carlo-proxy.onrender.com';
+
+export async function validateFundamentalsAI(ticker, sector, currency, currentPrice) {
+  const getNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
+  const fields = {
+    eps:       getNum('eps'),
+    pe:        getNum('pe'),
+    fcf:       getNum('fcf'),
+    growth:    getNum('growth'),
+    wacc:      getNum('wacc'),
+    assets:    getNum('assets'),
+    cash:      getNum('cash'),
+    debt:      getNum('debt'),
+    shares:    getNum('shares'),
+    ltv:       getNum('ltv'),
+    occupancy: getNum('occupancy'),
+    dividend:  getNum('dividend'),
+  };
+
+  const resp = await fetch(`${MY_PROXY_VAL}/validate-fundamentals`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ ticker, sector, currency, currentPrice, fields }),
+  });
+  if (!resp.ok) throw new Error(`Proxy error ${resp.status}`);
+  return resp.json();
+}
+
+// ── Aplica corectiile AI si afiseaza panelul de diff ──
+
+// Stocheaza ultimul rezultat AI pentru butonul de aplicare
+let _lastAIResult = null;
+let _lastAICurrency = null;
+
+export function applyAIValidation(result, currency) {
+  _lastAIResult   = result;
+  _lastAICurrency = currency;
+
+  const sym    = currency === 'USD' ? '$' : currency + ' ';
+  const getNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
+  const fmtV   = (v, id) => {
+    const dec = ['assets','cash','debt','shares'].includes(id) ? 0
+              : ['growth','wacc','tgr','ltv','occupancy'].includes(id) ? 1 : 2;
+    return v != null ? v.toFixed(dec) : '—';
+  };
+
+  const LABELS = {
+    eps:'EPS', pe:'P/E', fcf:'FCF/acț', growth:'Creștere %',
+    wacc:'WACC %', assets:'Active T', cash:'Cash M', debt:'Datorii M',
+    ltv:'LTV %', dividend:'Dividend', shares:'Acțiuni M',
+  };
+
+  const corrections = result.corrections || {};
+  const rows = Object.entries(corrections)
+    .filter(([, v]) => v != null)
+    .map(([id, corrected]) => {
+      const original = getNum(id);
+      return { id, label: LABELS[id] || id, original, corrected };
+    });
+
+  const isValid = result.valid !== false;
+  const hasCorr = rows.length > 0;
+  const vcColor = isValid && !hasCorr ? '#66bb6a' : hasCorr ? '#ffa726' : '#ef5350';
+  const vcIcon  = isValid && !hasCorr ? '✔' : hasCorr ? '⚠' : '✘';
+
+  const diffRows = rows.map(({ label, original, id, corrected }) => `
+    <tr>
+      <td style="color:rgba(255,255,255,0.45);padding:3px 8px 3px 0;font-size:10.5px;">${label}</td>
+      <td style="color:#ef9a9a;text-decoration:line-through;padding:3px 8px;font-size:10.5px;white-space:nowrap;">
+        ${original != null ? fmtV(original, id) : '—'}
+      </td>
+      <td style="color:#a5d6a7;font-weight:600;padding:3px 0;font-size:10.5px;white-space:nowrap;">
+        → ${fmtV(corrected, id)}
+      </td>
+    </tr>`).join('');
+
+  const issuesList = (result.issues || []).map(i =>
+    `<div style="font-size:10px;color:rgba(255,167,38,0.8);margin-top:2px;">• ${i}</div>`
+  ).join('');
+
+  const applyBtnHtml = hasCorr ? `
+    <button id="val-ai-apply-btn" onclick="window._applyAICorrections()"
+      style="margin-top:10px;padding:5px 14px;border-radius:14px;border:1px solid rgba(255,167,38,0.5);
+             background:rgba(255,167,38,0.1);color:#ffa726;font-size:10.5px;font-weight:700;
+             cursor:pointer;letter-spacing:0.3px;">
+      ✦ Aplică corecțiile AI
+    </button>` : '';
+
+  let el = document.getElementById('val-ai-validation');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'val-ai-validation';
+    const grid = document.getElementById('val-results-grid');
+    grid?.parentNode?.insertBefore(el, grid);
+  }
+
+  el.innerHTML = `
+    <div style="margin-bottom:12px;padding:10px 13px;
+                background:${vcColor}08;border:1px solid ${vcColor}33;border-radius:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  margin-bottom:${hasCorr || issuesList ? '8px' : '0'};">
+        <span style="font-size:11px;font-weight:700;color:${vcColor};">
+          ${vcIcon} AI Validator — ${result.verdict || 'Verificat'}
+        </span>
+        <span style="font-size:9px;color:rgba(255,255,255,0.25);">claude-haiku · câmpurile rămân editabile</span>
+      </div>
+      ${hasCorr ? `
+        <table style="border-collapse:collapse;width:auto;">
+          <thead><tr>
+            <th style="font-size:9px;color:rgba(255,255,255,0.3);font-weight:600;padding:0 8px 4px 0;text-align:left;">Câmp</th>
+            <th style="font-size:9px;color:rgba(255,255,255,0.3);font-weight:600;padding:0 8px 4px;text-align:left;">Inițial (Yahoo)</th>
+            <th style="font-size:9px;color:rgba(255,255,255,0.3);font-weight:600;padding:0 0 4px;text-align:left;">Sugerat AI</th>
+          </tr></thead>
+          <tbody>${diffRows}</tbody>
+        </table>
+        ${applyBtnHtml}` : '<div style="font-size:10.5px;color:rgba(255,255,255,0.4);">Toate valorile par corecte.</div>'}
+      ${issuesList}
+    </div>`;
+}
+
+// Aplica efectiv corectiile AI in campuri — pastreaza editabilitatea
+window._applyAICorrections = function () {
+  if (!_lastAIResult) return;
+  const corrections = _lastAIResult.corrections || {};
+  Object.entries(corrections).forEach(([id, corrected]) => {
+    if (corrected == null) return;
+    const dec = ['assets','cash','debt','shares'].includes(id) ? 0
+              : ['growth','wacc','tgr','ltv','occupancy'].includes(id) ? 1 : 2;
+    setValInput(id, corrected, dec);
+  });
+  // Feedback vizual pe buton
+  const btn = document.getElementById('val-ai-apply-btn');
+  if (btn) {
+    btn.textContent = '✓ Aplicat — poți modifica în continuare';
+    btn.style.color = '#a5d6a7';
+    btn.style.borderColor = 'rgba(102,187,106,0.5)';
+    btn.style.background  = 'rgba(102,187,106,0.08)';
+    btn.disabled = true;
+  }
+  updateValuare();
+};
+
+// ── Handler buton Validare AI (apelat din HTML onclick) ──
+window._runAIValidation = async function () {
+  const btn = document.getElementById('val-ai-validate-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Validare AI...'; }
+
+  const _sector   = $('val-sector')?.value || 'tech';
+  const _priceEl  = $('val-current-price');
+  const _price    = _priceEl ? parseFloat(_priceEl.dataset.price) : 0;
+  const _currency = _priceEl ? (_priceEl.dataset.currency || 'USD') : 'USD';
+  const _ticker   = document.getElementById('stock-ticker')?.textContent?.trim() || '';
+
+  try {
+    const result = await validateFundamentalsAI(_ticker, _sector, _currency, _price);
+    applyAIValidation(result, _currency);
+  } catch (err) {
+    console.warn('[AI validation]', err.message);
+    let el = document.getElementById('val-ai-validation');
+    if (!el) { el = document.createElement('div'); el.id = 'val-ai-validation';
+      document.getElementById('val-results-grid')?.parentNode?.insertBefore(el, document.getElementById('val-results-grid')); }
+    el.innerHTML = `<div style="padding:8px 12px;border:1px solid rgba(239,83,80,0.3);border-radius:8px;
+      font-size:10.5px;color:rgba(239,83,80,0.7);">⚠ AI validator indisponibil — ${err.message}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 Validare AI'; }
+  }
+};
 
 window.toggleValuare = function () {
   const content = $('val-content');
@@ -214,9 +499,13 @@ let _techCtx = {};
 let _lastAIScore = null;
 export function getLastAIScore() { return _lastAIScore; }
 
-function calcAIScore(margin, deviationPct, reitMetrics) {
+// ── Ultimul rezultat al calcului de valuare ───────────
+let _lastValResult = null;
+export function getLastValResult() { return _lastValResult; }
+
+function calcAIScore(margin, deviationPct) {
   // Fund score din marja de siguranta fundamentala
-  let fundScore = 50;
+  let fundScore = 50; // neutral daca nu avem date
   if (margin != null) {
     if      (margin > 30)  fundScore = 88;
     else if (margin > 20)  fundScore = 75;
@@ -226,22 +515,8 @@ function calcAIScore(margin, deviationPct, reitMetrics) {
     else if (margin > -20) fundScore = 25;
     else                   fundScore = 12;
   }
-
-  // REIT: ajusteaza fundScore cu LTV + ocupare
-  if (reitMetrics) {
-    const { ltv, occupancy } = reitMetrics;
-    let reitAdj = 0;
-    if (ltv != null) {
-      reitAdj += ltv < 30 ? +8 : ltv < 40 ? +3 : ltv < 50 ? -5 : -15;
-    }
-    if (occupancy != null) {
-      reitAdj += occupancy > 95 ? +8 : occupancy > 90 ? +3 : occupancy > 85 ? -4 : -12;
-    }
-    fundScore = Math.max(0, Math.min(100, fundScore + reitAdj));
-  }
-
   // Tech score din deviatia fata de MA60 (negativ = sub MA = bun)
-  let techScore = 50;
+  let techScore = 50; // neutral daca nu avem date
   if (deviationPct != null) {
     if      (deviationPct < -15) techScore = 90;
     else if (deviationPct <  -5) techScore = 72;
@@ -274,17 +549,8 @@ function generateFundamentalComment(weighted, curPrice, margin, sym) {
   const { deviationPct, drift, sigma, mean50 } = _techCtx;
   const hasTech = deviationPct != null;
 
-  // ── REIT metrics pentru scoring ──────────────────────
-  const getNum = id => { const v = parseFloat($(`val-${id}`)?.value); return isNaN(v) ? null : v; };
-  const sector = $('val-sector')?.value || 'tech';
-  const reitMetrics = sector === 'reit' ? {
-    ltv:       getNum('ltv'),
-    occupancy: getNum('occupancy'),
-    dividend:  getNum('dividend'),
-  } : null;
-
   // ── Scor AI ──────────────────────────────────────────
-  const ai = calcAIScore(margin, hasTech ? deviationPct : null, reitMetrics);
+  const ai = calcAIScore(margin, hasTech ? deviationPct : null);
   _lastAIScore = ai;
   const vc = ai.verdict === 'BUY' ? '#66bb6a' : ai.verdict === 'HOLD' ? '#ffee58' : '#ef5350';
   const scoreBadgeHtml = `
@@ -381,55 +647,6 @@ function generateFundamentalComment(weighted, curPrice, margin, sym) {
       </div>`;
   }
 
-  // ── Bloc REIT ────────────────────────────────────────
-  let reitHtml = '';
-  if (reitMetrics) {
-    const { ltv, occupancy, dividend } = reitMetrics;
-    const rows = [];
-
-    if (ltv != null) {
-      const lc = ltv < 30 ? '#66bb6a' : ltv < 40 ? '#ffee58' : ltv < 50 ? '#ffa726' : '#ef5350';
-      const lt = ltv < 30 ? 'Excelent — finanțare conservatoare, rezistă la creșteri de dobânzi'
-               : ltv < 40 ? 'Bun — risc moderat, în linie cu industria REIT'
-               : ltv < 50 ? 'Prudență — îndatorare ridicată, sensibil la ratele dobânzilor'
-               :             'Risc ridicat — LTV > 50% crește vulnerabilitatea la refinanțare';
-      rows.push(`<div class="vfc-row" style="margin-top:6px">
-        <span style="color:${lc};font-weight:600">LTV ${ltv.toFixed(1)}% — ${lt}</span>
-      </div>`);
-    }
-
-    if (occupancy != null) {
-      const oc = occupancy > 95 ? '#66bb6a' : occupancy > 90 ? '#ffee58' : occupancy > 85 ? '#ffa726' : '#ef5350';
-      const ot = occupancy > 95 ? 'Ocupare excelentă — flux de numerar stabil și predictibil'
-               : occupancy > 90 ? 'Ocupare bună — risc de venit redus'
-               : occupancy > 85 ? 'Ocupare medie — urmărește tendința de îmbunătățire'
-               :                   'Ocupare slabă — risc semnificativ asupra dividendului';
-      rows.push(`<div class="vfc-row">
-        <span style="color:${oc};font-weight:600">Rata ocupare ${occupancy.toFixed(1)}% — ${ot}</span>
-      </div>`);
-    }
-
-    if (dividend != null && curPrice > 0) {
-      const yieldPct = (dividend / curPrice) * 100;
-      const dc = yieldPct < 3 ? '#ffee58' : yieldPct < 8 ? '#66bb6a' : yieldPct < 12 ? '#ffa726' : '#ef5350';
-      const dt = yieldPct < 3  ? 'Dividend modest — potențial de creștere, dar randament scăzut'
-               : yieldPct < 8  ? 'Randament atractiv — tipic pentru un REIT sănătos'
-               : yieldPct < 12 ? 'Randament foarte ridicat — verifică sustenabilitatea dividendului'
-               :                  'Randament excesiv — posibil dividend nesustenabil (yield trap)';
-      rows.push(`<div class="vfc-row">
-        <span style="color:${dc};font-weight:600">Dividend yield ${yieldPct.toFixed(2)}% — ${dt}</span>
-      </div>`);
-    }
-
-    if (rows.length > 0) {
-      reitHtml = `
-        <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.07)">
-          <div class="vfc-title" style="margin-bottom:4px">🏢 Analiză REIT</div>
-          ${rows.join('')}
-        </div>`;
-    }
-  }
-
   return `
     ${scoreBadgeHtml}
     <div class="vfc-title">📋 Analiză Fundamentală + Timing Tehnic</div>
@@ -437,7 +654,6 @@ function generateFundamentalComment(weighted, curPrice, margin, sym) {
       <span style="color:${fundColor};font-weight:600">${fundLabel}</span>
     </div>
     <div class="vfc-row" style="color:rgba(255,255,255,0.8)">${fundAdvice}</div>
-    ${reitHtml}
     ${techHtml}`;
 }
 
@@ -480,23 +696,41 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
   priceEl.dataset.price    = currentPrice;
   priceEl.dataset.currency = currency || 'USD';
 
+  // Populeaza si val-current-price pentru AI validator
+  const valPriceEl = $('val-current-price');
+  if (valPriceEl) {
+    valPriceEl.dataset.price    = currentPrice;
+    valPriceEl.dataset.currency = currency || 'USD';
+  }
+
+  // ── Curata campurile la fiecare ticker nou ────────────
+  ['dividend', 'ltv', 'occupancy'].forEach(id => {
+    const el = $(`val-${id}`);
+    if (el) { el.value = ''; el.style.borderColor = ''; }
+  });
+  ['eps','pe','fcf','assets','cash','debt','shares','growth'].forEach(id => {
+    const el = $(`val-${id}`);
+    if (el) { el.value = ''; el.style.borderColor = ''; }
+  });
+  // Restaureaza defaulturi pentru campurile care nu vin din Yahoo
+  const waccEl = $('val-wacc'); if (waccEl && !waccEl.value) waccEl.value = '9';
+  const tgrEl  = $('val-tgr');  if (tgrEl  && !tgrEl.value)  tgrEl.value  = '2.5';
+  // Curata panelul AI Validator de la ticker-ul anterior
+  const aiValEl = document.getElementById('val-ai-validation');
+  if (aiValEl) aiValEl.innerHTML = '';
+  const aiBtn = document.getElementById('val-ai-validate-btn');
+  if (aiBtn) { aiBtn.style.display = 'none'; aiBtn.disabled = false; aiBtn.textContent = '🤖 Validare AI'; }
+
   if (yahooSector && YAHOO_TO_VAL_SECTOR[yahooSector]) {
     const sel = $('val-sector');
     if (sel) sel.value = YAHOO_TO_VAL_SECTOR[yahooSector];
   }
 
   if (!panel.dataset.listenersAttached) {
-    ['sector','eps','pe','fcf','growth','wacc','tgr','assets','cash','debt','shares',
-     'ltv','occupancy','dividend'].forEach(id => {
+    ['sector','eps','pe','fcf','growth','wacc','tgr','assets','cash','debt','shares','ltv','occupancy','dividend'].forEach(id => {
       const el = $(`val-${id}`);
       el?.addEventListener('input',  updateValuare);
       el?.addEventListener('change', updateValuare);
-    });
-    // Sector change: arata/ascunde campuri REIT imediat
-    $('val-sector')?.addEventListener('change', () => {
-      const isReit = $('val-sector').value === 'reit';
-      const reitBlock = document.getElementById('val-reit-block');
-      if (reitBlock) reitBlock.style.display = isReit ? 'contents' : 'none';
     });
     panel.dataset.listenersAttached = '1';
   }
@@ -518,6 +752,14 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
   }
   updateValuare();
 
+  // Buton AI — vizibil dar faded in timpul fetch-ului
+  const aiBtnInit = $('val-ai-validate-btn');
+  if (aiBtnInit) {
+    aiBtnInit.style.display  = 'inline-flex';
+    aiBtnInit.style.opacity  = '0.45';
+    aiBtnInit.style.pointerEvents = 'none';
+  }
+
   if (!ticker) return;
   fetchValuationFundamentals(ticker).then(d => {
     if (metaFundamentals.eps == null) setValInput('eps', d.eps, 2);
@@ -533,6 +775,8 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
     setValInput('cash',   d.cash,        0);
     setValInput('debt',   d.debt,        0);
     setValInput('growth', d.growth,      1);
+    if (d.dividendRate != null) setValInput('dividend', d.dividendRate, 2);
+    if (d.ltv          != null) setValInput('ltv',       d.ltv,        1);
 
     // PE: din Yahoo quote; daca lipseste, calculeaza din pret/EPS
     if (metaFundamentals.pe == null) {
@@ -555,13 +799,16 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
     const srcStr = Object.entries(srcGroups)
       .map(([src, fields]) => `${src}: ${fields.join(', ')}`)
       .join(' · ');
-    // ── REIT: populeaza dividend + LTV daca disponibile ──
-    if (d.dividendRate != null)  setValInput('dividend', d.dividendRate, 2);
-    if (d.ltv          != null)  setValInput('ltv',       d.ltv,        1);
-
     statusEl.textContent = `✔ ${srcStr || 'Date disponibile'} · WACC, TGR — completează manual`;
     statusEl.style.color = 'rgba(102,187,106,0.65)';
     updateValuare();
+
+    // Activeaza butonul AI dupa ce datele sunt incarcate
+    const aiBtnEl = $('val-ai-validate-btn');
+    if (aiBtnEl) {
+      aiBtnEl.style.opacity       = '1';
+      aiBtnEl.style.pointerEvents = 'auto';
+    }
   }).catch(err => {
     const msg = metaPopulated > 0
       ? '⚠ FCF/cash/datorii indisponibile — completează manual'
@@ -569,6 +816,12 @@ export function initValuarePanel(currentPrice, currency, yahooSector, ticker, me
     statusEl.textContent = msg;
     statusEl.style.color = 'rgba(255,167,38,0.6)';
     console.warn('Val fetch error:', err);
+    // Activeaza butonul si in caz de eroare
+    const aiBtnErr = $('val-ai-validate-btn');
+    if (aiBtnErr) {
+      aiBtnErr.style.opacity       = '1';
+      aiBtnErr.style.pointerEvents = 'auto';
+    }
   });
 }
 
@@ -638,4 +891,210 @@ export function generateQualityComment({ sigma, volAnualPct, nu, garch, drift, d
   }
 
   return parts.join('<br>');
+}
+
+// ── Sectiunea "Simulare cu param: σ" — integrata in panoul de valuare ──
+
+export function renderSimulationSection({ sigma, volAnualPct, nu, garch, drift, deviationPct, volumeTrend, ivData, ivEstimated, mean50 }) {
+
+  // ── Valori afisate (aceeasi logica din fostele pills) ──
+  const sigmaStaticPct = (sigma * 100).toFixed(3);
+  const sigmaColor     = sigma < 0.01 ? '#66bb6a' : sigma < 0.02 ? '#ffee58' : '#ef5350';
+
+  const garchStr   = garch
+    ? `${(garch.sigma0 * 100).toFixed(3)}%/zi ${garch.sigma0 > garch.sigmaLR * 1.15 ? '🔴' : garch.sigma0 < garch.sigmaLR * 0.85 ? '🟢' : '🟡'}`
+    : 'N/A';
+  const garchColor = !garch ? '#888'
+    : garch.sigma0 > garch.sigmaLR * 1.15 ? '#ef5350'
+    : garch.sigma0 < garch.sigmaLR * 0.85 ? '#66bb6a' : '#ffee58';
+
+  const persStr   = garch ? `${(garch.persistence * 100).toFixed(1)}%` : 'N/A';
+  const persColor = !garch ? '#888' : garch.persistence < 0.85 ? '#66bb6a' : garch.persistence < 0.95 ? '#ffee58' : '#ef5350';
+
+  const nuColor = nu < 5 ? '#ef5350' : nu < 8 ? '#ffa726' : nu < 20 ? '#ffee58' : '#66bb6a';
+  const nuStr   = nu >= 29 ? `ν=${nu.toFixed(1)} normal`
+                : nu >= 10 ? `ν=${nu.toFixed(1)} medii`
+                : nu >= 5  ? `ν=${nu.toFixed(1)} groase`
+                :            `ν=${nu.toFixed(1)} f.groase`;
+
+  const volColor   = volAnualPct < 20 ? '#66bb6a' : volAnualPct < 40 ? '#ffee58' : '#ef5350';
+  const driftColor = drift > 0.0001 ? '#66bb6a' : drift < -0.0001 ? '#ef5350' : '#888';
+  const driftStr   = `${drift >= 0 ? '+' : ''}${(drift * 100).toFixed(4)}%/zi`;
+
+  const absDev    = Math.abs(deviationPct);
+  const ma60Color = absDev < 5 ? '#66bb6a' : absDev < 15 ? '#ffee58' : '#ef5350';
+  const ma60Str   = `${mean50 != null ? mean50.toFixed(2) : '—'} (${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1)}%)`;
+
+  const vtDetail  = volumeTrend?.detail ?? '';
+  const vtColor   = vtDetail === 'bullish' ? '#66bb6a' : vtDetail === 'bearish' ? '#ef5350'
+                  : vtDetail.includes('bullish') ? '#ffee58' : vtDetail.includes('bearish') ? '#ffa726' : '#888';
+  const vtStr     = volumeTrend?.label ?? '—';
+
+  let ivStr = 'N/A', ivColor = '#888';
+  if (ivData) {
+    const ivAnnPct = (ivData.ivAnnual * 100).toFixed(1);
+    const ivRatio  = ivData.ivDaily / sigma;
+    ivColor = ivRatio < 0.85 ? '#66bb6a' : ivRatio < 1.20 ? '#ffee58' : '#ef5350';
+    ivStr   = ivEstimated ? `~${ivAnnPct}%/an est.` : `${ivAnnPct}%/an · ${ivData.daysToExp}z`;
+  }
+
+  let skewStr = 'N/A', skewColor = '#888';
+  if (ivData?.skewData) {
+    const { skew } = ivData.skewData;
+    const skewPct  = (skew * 100).toFixed(1);
+    skewColor = skew < 0 ? '#66bb6a' : skew < 0.08 ? '#ffee58' : skew < 0.15 ? '#ffa726' : '#ef5350';
+    skewStr   = ivEstimated ? `~${skew >= 0 ? '+' : ''}${skewPct}% est.` : `${skew >= 0 ? '+' : ''}${skewPct}%`;
+  }
+
+  // ── Textul calitativ ──
+  const qualText = generateQualityComment({ sigma, volAnualPct, nu, garch, drift, deviationPct, volumeTrend, ivData, ivEstimated });
+
+  // ── Helper: construieste un param-pill cu tooltip ──
+  function pill(label, value, valueColor, bubbleHtml, tipLeft = false) {
+    return `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 9px;
+                 border-radius:20px;border:1px solid rgba(255,255,255,0.10);
+                 background:rgba(255,255,255,0.04);font-size:10.5px;
+                 color:rgba(255,255,255,0.55);position:relative;">
+      <span class="tip-wrap" style="display:inline-flex;align-items:center;gap:4px;">
+        ${label} <i class="tip-icon">i</i>
+        <div class="tip-bubble${tipLeft ? ' tip-left' : ''}">${bubbleHtml}</div>
+      </span>
+      <span style="color:${valueColor};font-weight:600;">${value}</span>
+    </span>`;
+  }
+
+  const pillsHtml = [
+    pill('σ/zi:', sigmaStaticPct + '%', sigmaColor, `
+      <strong>📊 Sigma zilnica (statica)</strong>
+      Media volatilitatii zilnice calculate din ultimul an de tranzactionare.
+      <div class="tip-scale">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 1%/zi — calm (ETF, indici)</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 1–2%/zi — normal (actiuni mari)</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 2%/zi — volatil (crypto, meme)</div>
+      </div>
+      <span class="tip-impact">Influenteaza: dispersia scenariilor simulate</span>`),
+
+    pill('Vol/an:', volAnualPct.toFixed(1) + '%', volColor, `
+      <strong>📅 Volatilitate anualizata</strong>
+      Sigma zilnica × √252 — standardul din industrie pentru compararea riscului intre active.
+      <div class="tip-scale">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 20% — actiuni stabile (JNJ, KO)</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 20–40% — volatilitate medie</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 40% — very volatile (crypto, meme)</div>
+      </div>
+      <span class="tip-impact">Indicator general de risc al activului</span>`),
+
+    pill('Fat-t:', nuStr, nuColor, `
+      <strong>📉 Distributie Student-t(ν)</strong>
+      Distributia normala subestimeaza dramatic crashurile. Student-t corecteaza asta prin cozi mai groase.
+      <div class="tip-scale" style="margin-top:5px">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> ν = 3–4 — cozi f. groase (crypto)</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> ν = 5–7 — cozi groase (TSLA, NVDA)</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> ν = 8–15 — cozi medii (actiuni normale)</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> ν &gt; 20 — practic normal (indici)</div>
+      </div>
+      <span class="tip-impact">Influenteaza: frecventa evenimentelor extreme</span>`),
+
+    pill('GARCH:', garchStr, garchColor, `
+      <strong>📈 GARCH(1,1) — Volatilitate actuala</strong>
+      Volatilitatea conditionata <em>acum</em>, estimata din ultimele 60 de zile. Reflecta regimul curent al pietei, nu media istorica.
+      <div class="tip-scale">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> 🟢 sub medie — piata calma</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 🟡 aproape de medie — normal</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> 🔴 peste medie — piata agitata</div>
+      </div>
+      <span class="tip-impact">Influenteaza: volatilitatea de start in simulare</span>`),
+
+    pill('Pers:', persStr, persColor, `
+      <strong>🔄 Persistenta GARCH (α+β)</strong>
+      Cat de "lipicioasa" e volatilitatea — cat timp dureaza un soc pana se disipa.
+      <div class="tip-scale">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 85% — socurile dispar rapid</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 85–95% — volatilitate persistenta</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 95% — soc dureaza saptamani</div>
+      </div>
+      <span class="tip-impact">Influenteaza: viteza de normalizare dupa soc</span>`),
+
+    pill('Drift:', driftStr, driftColor, `
+      <strong>📈 Drift — Tendinta zilnica</strong>
+      Directia medie a pretului per zi din ultimul an. Influenteaza direct unde se concentreaza simularile.
+      <div class="tip-scale">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &gt; 0 — tendinta de crestere</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> ≈ 0 — piata laterala</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &lt; 0 — tendinta de scadere</div>
+      </div>
+      <span class="tip-impact">Influenteaza: media preturilor simulate</span>`),
+
+    pill('MA60:', ma60Str, ma60Color, `
+      <strong>〰️ Media mobila 60 zile</strong>
+      Cat de departe e pretul curent fata de media pe 60 de zile. Deviatia mare declanseaza mean reversion in simulare.
+      <div class="tip-scale">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 5% — pret aproape de medie</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 5–15% — deviere moderata</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 15% — deviere semnificativa</div>
+      </div>
+      <span class="tip-impact">Influenteaza: mean reversion in GBM</span>`, true),
+
+    pill('Vol.Trend:', vtStr, vtColor, `
+      <strong>🔊 Trend volum tranzactionare</strong>
+      Volumul din ultimele 10 zile vs media pe 30 de zile, corelat cu directia pretului.
+      <div class="tip-scale">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> Bullish — volum mare + pret sus</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#888"></span> Neutral — fara confirmare</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> Bearish — volum mare + pret jos</div>
+      </div>
+      <span class="tip-impact">Influenteaza: ajustarea drift-ului AI</span>`, true),
+
+    pill('IV opt:', ivStr, ivColor, `
+      <strong>📉 Volatilitate Implicita (Optiuni)</strong>
+      Ce plateste piata <em>acum</em> pentru risc pe urmatoarele ~30 de zile — forward-looking, nu bazata pe trecut.
+      <div class="tip-scale" style="margin-top:5px">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> IV &lt; sigma istorica — piata calma</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> IV ≈ sigma istorica — risc normal</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> IV &gt; sigma istorica — eveniment iminent</div>
+      </div>
+      <div style="margin-top:6px;font-size:10.5px">IV are greutate <b>70%</b> pe 30 zile si scade la <b>10%</b> pe 360 zile.</div>
+      <span class="tip-impact">Influenteaza: sigma in simulare, mai ales pe termen scurt</span>`, true),
+
+    pill('Skew:', skewStr, skewColor, `
+      <strong>📐 Put/Call Skew — Directie implicita</strong>
+      Diferenta de IV intre put-urile OTM (~7% sub pret) si call-urile OTM (~7% peste pret). Reflecta cat de mult se teme piata de o scadere vs cat spera la o crestere.
+      <div class="tip-scale" style="margin-top:5px">
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#66bb6a"></span> &lt; 0% — call-uri mai scumpe, sentiment bullish</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffee58"></span> 0–8% — skew normal pentru actiuni</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ffa726"></span> 8–15% — teama crescuta de scadere</div>
+        <div class="tip-scale-row"><span class="tip-dot" style="background:#ef5350"></span> &gt; 15% — protectie impotriva crashului</div>
+      </div>
+      <span class="tip-impact">Influenteaza: drift in ambele simulari (clasica + AI)</span>`, true),
+  ].join('');
+
+  // ── Gaseste sau creeaza elementul sectiunii ──
+  let el = document.getElementById('val-sim-section');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'val-sim-section';
+    const fundComment = document.getElementById('val-fundamental-comment');
+    if (fundComment) fundComment.appendChild(el);
+    else document.getElementById('val-content')?.appendChild(el);
+  }
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);">
+      <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.30);
+                  letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">
+        Simulare cu param: σ &nbsp;·&nbsp; hover pe
+        <i class="tip-icon" style="pointer-events:none;vertical-align:middle;">i</i>
+        pentru detalii
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;">
+        ${pillsHtml}
+      </div>
+      <div style="font-size:11.5px;line-height:1.65;color:rgba(255,255,255,0.58);
+                  padding:8px 12px;border-radius:7px;
+                  border:1px solid rgba(255,255,255,0.07);
+                  background:rgba(255,255,255,0.02);">
+        ${qualText}
+      </div>
+    </div>`;
 }
